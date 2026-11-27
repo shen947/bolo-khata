@@ -1,0 +1,126 @@
+# Bolo Khata · बोलो खाता
+
+**A voice-first udhaar (credit) ledger for India's kirana shops.**
+The shop owner taps one button and says *"Ramesh ne 250 ka saman liya"*. The app hears the name, the amount and whether it was credit or a payment, reads it back (*"Ramesh, 250 rupaye udhaar. Sahi hai?"*) and saves it. No forms, no typing, no reading.
+
+Built for the Scaler × Wispr Flow hackathon *India Runs on Voice*. Track: **Livelihoods and small business**.
+
+| Speak | Confirm | Customer ledger |
+|---|---|---|
+| ![Home](docs/home.png) | ![Confirm](docs/confirm.png) | ![Customer](docs/customer.png) |
+
+## Why this exists
+
+My father runs a retail store. Every day customers pick up atta, oil or milk and say *"shaam ko de dunga"*. He's serving three other people, so the entry goes into a notebook later, half-written, or not at all. A month later nobody agrees on the balance and the money is written off.
+
+Khata apps exist, but they're built around forms: pick a customer, type an amount, choose credit or debit, then save. That's too many steps at a busy counter, and too hard for owners who aren't comfortable typing. **Speaking one sentence takes three seconds and needs no free hands.** Here, voice is the only way the entry gets made at the moment the udhaar happens, not a feature added on top.
+
+## What it does
+
+| Say | What happens |
+|---|---|
+| `Ramesh ne 250 ka saman liya` / `रमेश ने 250 का सामान लिया` | Credit entry → spoken read-back → auto-saves in 5 s unless you say "nahi" |
+| `Sunita ne 500 jama kiye` / `Sunita paid 500` | Payment entry |
+| `Pappu ko 3 packet doodh diya 90 rupaye` | ₹90 credit; "3 packet doodh" kept as the note (quantity ≠ amount) |
+| `Mohan ne dhai sau ka atta liya` | Number words work: dhai sau = 250, saade teen sau = 350, do hazaar paanch sau = 2500 |
+| `रमेशने 300 रुपयांचे सामान घेतले` | Marathi, with glued case markers split correctly |
+| `Ramesh ka kitna baaki hai?` | Speaks the balance |
+| `Aaj kis kis ka udhaar hai?` | Who took credit today, with totals |
+| `Sabse zyada kiska baaki hai?` | Top 5 balances |
+| `Kul kitna baaki hai?` | Total pending across all customers |
+| `Pichli entry cancel karo` | Cancels the last entry (kept in the audit trail) |
+| `haan` / `nahi` | Confirms or rejects the card on screen |
+
+**Built for real counters:**
+- **Missing piece? It asks only for that.** *"Ramesh ne saman liya"* gets back *"Ramesh, kitne rupaye?"* and it listens again hands-free.
+- **Two Rameshes?** It shows both as big buttons and asks *"Kaun se Ramesh?"*
+- **Devanagari ⇄ Latin matching.** "मोहन" finds the customer saved as "Mohan Lal".
+- **Unclear credit or payment?** It defaults to udhaar and *says so*. One tap switches it.
+- **Mistakes:** 30-second undo toast, voice undo, and per-entry cancel. Nothing is ever hard-deleted; every change is in `/api/audit`.
+- **Weak internet:** the app shell is cached (PWA). Entries spoken offline are queued on the phone and processed when the network returns.
+- **WhatsApp reminder** in one tap, with the exact balance, in the shop's language.
+- **Three languages:** Hindi, Marathi, English (UI, speech recognition and spoken replies).
+
+## Run it
+
+```bash
+docker compose up
+```
+
+Open **http://localhost:8000** in **Chrome** (desktop or Android) and allow the microphone. No `.env` and no API keys needed. It starts with 10 demo customers.
+
+> Speech recognition uses the browser's Web Speech API (`hi-IN`, `mr-IN`, `en-IN`), which Chrome supports. In other browsers, use the text box under the mic; everything else works the same.
+
+### Without Docker
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
+
+### Tests
+```bash
+cd backend && pip install -r requirements-dev.txt && pytest
+```
+43 tests cover Hindi, Hinglish, Marathi and English sentences, number words, quantity-vs-amount, follow-up questions, ambiguous names, voice undo and the full API flow.
+
+## Configuration (all optional)
+
+See [`.env.example`](.env.example).
+
+| Variable | Default | What it does |
+|---|---|---|
+| `SHOP_NAME` | Singh General Store | Header and WhatsApp reminder text |
+| `DEFAULT_LANG` | `hi` | `hi`, `mr` or `en` |
+| `SEED_DEMO` | `true` | Load 10 demo customers on first start |
+| `LLM_API_KEY` | *(empty)* | Optional. Adds an LLM parser for unusual sentences; falls back to rules on any error |
+| `LLM_BASE_URL` | OpenAI | Any OpenAI-compatible endpoint (Groq, OpenRouter, Sarvam, local Ollama…) |
+| `LLM_MODEL` | `gpt-4o-mini` | Model name |
+
+## How it works
+
+```
+ Chrome (PWA)                                   FastAPI                       SQLite
+ ┌──────────────────────────┐   text + lang    ┌─────────────────────────┐   ┌──────────┐
+ │ 🎙 Web Speech API         │ ───────────────▶ │ /api/interpret           │   │customers │
+ │   hi-IN / mr-IN / en-IN   │                  │  rules parser (default)  │◀─▶│entries   │
+ │ confirm card + 5s timer   │ ◀─────────────── │  optional LLM parser     │   │audit     │
+ │ 🔊 speechSynthesis replies│  kind + reply    │  fuzzy name matcher      │   └──────────┘
+ │ offline queue (local)     │                  │ /api/entries, /customers │
+ └──────────────────────────┘                  └─────────────────────────┘
+```
+
+- **`backend/app/parser.py`**: a rules parser for one counter sentence. It transliterates Devanagari to a phonetic key, so a keyword list written once matches उधार, udhaar and udhar. It finds the amount (digits, Hindi/Marathi/English number words, dedh/dhai/saade/sava), the name (by case markers ne/ko/ka/la/चे, including Marathi glued suffixes), credit vs payment (with "X ko diya" vs "X ne diye" handled correctly), notes, and query intents.
+- **`backend/app/lang.py`**: Devanagari → Latin transliteration with schwa deletion, plus the phonetic normaliser used for matching.
+- **`backend/app/db.py`**: the ledger, balances, fuzzy customer matching (exact / ambiguous / new) and the audit trail.
+- **`backend/app/replies.py`**: one-line spoken replies in Hindi, Marathi and English.
+- **`frontend/`**: plain HTML/CSS/JS with no build step. Includes the service worker for offline use.
+
+### API
+| Method | Path | |
+|---|---|---|
+| POST | `/api/interpret` | `{text, lang, context?}` → `confirm` / `clarify` / `choose` / `answer` / `undone` / `unknown` |
+| POST | `/api/entries` | Save an entry (`customer_id` or `name`, `amount`, `type`) |
+| POST | `/api/entries/{id}/cancel` | Cancel (soft) |
+| GET | `/api/summary` | Today's credit and collections, total pending, recent entries |
+| GET | `/api/customers` · `/api/customers/{id}` | Balances, history, WhatsApp reminder link |
+| PATCH | `/api/customers/{id}` | Save a phone number |
+| GET | `/api/audit` | Every change, ever |
+
+## Dependencies and their risks
+
+| Dependency | Used for | Cost | Risk and mitigation |
+|---|---|---|---|
+| Chrome Web Speech API | Speech-to-text | Free | Needs Chrome and internet. The text box always works; next step is a pluggable STT adapter (Sarvam / Bhashini / Whisper) for offline-first Android |
+| Browser speechSynthesis | Spoken replies | Free | Marathi voices are missing on some phones; falls back to the Hindi voice |
+| Optional LLM | Odd sentences | ~₹0.01 per entry with a small model | Off by default; rules parser is the fallback |
+| WhatsApp `wa.me` links | Reminders | Free | Owner presses send; no WhatsApp Business API needed |
+
+## Roadmap
+- Pilot at my father's store and 10 nearby shops: measure the share of udhaar captured vs the notebook, seconds per entry, and recovery of 30+ day dues.
+- Android wrapper with on-device STT for no-network shops.
+- Learn each shop's customer names and nicknames over time.
+- Weekly "who to remind" voice summary.
+
+## License
+MIT

@@ -1,0 +1,510 @@
+/* Bolo Khata: voice-first udhaar ledger. Plain JS, no build step. */
+(() => {
+  "use strict";
+
+  // ------------------------------------------------------------ strings
+  const UI = {
+    nav_home: { hi: "बोलो", mr: "बोला", en: "Speak" },
+    nav_khata: { hi: "खाता", mr: "खाते", en: "Ledger" },
+    today_given: { hi: "आज उधार दिया", mr: "आज उधार दिले", en: "Credit given today" },
+    today_got: { hi: "आज जमा हुआ", mr: "आज जमा झाले", en: "Collected today" },
+    pending: { hi: "कुल बाकी", mr: "एकूण बाकी", en: "Total pending" },
+    from_n: { hi: "{n} ग्राहकों से", mr: "{n} ग्राहकांकडून", en: "from {n} customers" },
+    tap: { hi: "दबाइए और बोलिए", mr: "दाबा आणि बोला", en: "Tap and speak" },
+    listening: { hi: "सुन रहा हूँ…", mr: "ऐकत आहे…", en: "Listening…" },
+    thinking: { hi: "समझ रहा हूँ…", mr: "समजत आहे…", en: "Working it out…" },
+    examples: {
+      hi: "<q>रमेश ने 250 का सामान लिया</q> <q>सुनीता ने 500 जमा किए</q> <q>रमेश का कितना बाकी है?</q>",
+      mr: "<q>रमेशने 250 रुपयांचे सामान घेतले</q> <q>सुनीताने 500 जमा केले</q> <q>रमेशचे किती बाकी आहे?</q>",
+      en: "<q>Ramesh took 250 on credit</q> <q>Sunita paid 500</q> <q>How much does Ramesh owe?</q>",
+    },
+    type_here: { hi: "या यहाँ लिखें…", mr: "किंवा इथे लिहा…", en: "Or type here…" },
+    go: { hi: "भेजें", mr: "पाठवा", en: "Send" },
+    recent: { hi: "हाल की एंट्री", mr: "अलीकडील नोंदी", en: "Recent entries" },
+    no_entries: { hi: "अभी कोई एंट्री नहीं। माइक दबाकर पहली एंट्री बोलिए।", mr: "अजून नोंद नाही. माइक दाबून पहिली नोंद बोला.", en: "No entries yet. Tap the mic and say the first one." },
+    credit: { hi: "उधार", mr: "उधार", en: "Credit" },
+    payment: { hi: "जमा", mr: "जमा", en: "Paid" },
+    save: { hi: "हाँ, सेव करें", mr: "हो, सेव्ह करा", en: "Yes, save" },
+    cancel: { hi: "नहीं", mr: "नाही", en: "No" },
+    swap_to_payment: { hi: "यह जमा था? बदलें", mr: "हे जमा होते? बदला", en: "This was a payment? Switch" },
+    swap_to_credit: { hi: "यह उधार था? बदलें", mr: "हे उधार होते? बदला", en: "This was credit? Switch" },
+    say_haan: { hi: "\"हाँ\" या \"नहीं\" बोलिए। 5 सेकंड में अपने-आप सेव होगा।", mr: "\"हो\" किंवा \"नाही\" बोला. 5 सेकंदात आपोआप सेव्ह होईल.", en: "Say \"yes\" or \"no\". Saves by itself in 5 seconds." },
+    new_cust: { hi: "नया ग्राहक", mr: "नवीन ग्राहक", en: "New customer" },
+    heard: { hi: "सुना", mr: "ऐकले", en: "Heard" },
+    undo: { hi: "वापस लें", mr: "परत घ्या", en: "Undo" },
+    undone: { hi: "एंट्री रद्द की गई", mr: "नोंद रद्द केली", en: "Entry cancelled" },
+    search: { hi: "नाम खोजें", mr: "नाव शोधा", en: "Search a name" },
+    customers: { hi: "ग्राहक खाते", mr: "ग्राहक खाते", en: "Customer accounts" },
+    owes: { hi: "बाकी", mr: "बाकी", en: "owes" },
+    clear: { hi: "हिसाब साफ़", mr: "हिशोब पूर्ण", en: "All clear" },
+    advance: { hi: "एडवांस", mr: "आगाऊ", en: "Advance" },
+    back: { hi: "← वापस", mr: "← मागे", en: "← Back" },
+    remind: { hi: "WhatsApp पर याद दिलाएँ", mr: "WhatsApp वर आठवण करा", en: "Remind on WhatsApp" },
+    phone: { hi: "मोबाइल नंबर", mr: "मोबाईल नंबर", en: "Mobile number" },
+    save_phone: { hi: "सेव", mr: "सेव्ह", en: "Save" },
+    history: { hi: "पूरा हिसाब", mr: "संपूर्ण हिशोब", en: "Full history" },
+    cancel_entry: { hi: "रद्द करें", mr: "रद्द करा", en: "Cancel" },
+    which: { hi: "कौन से ग्राहक?", mr: "कोणते ग्राहक?", en: "Which customer?" },
+    new_with_name: { hi: "नया ग्राहक बनाएँ: {name}", mr: "नवीन ग्राहक: {name}", en: "New customer: {name}" },
+    offline: { hi: "इंटरनेट नहीं है। एंट्री फ़ोन में रखी है, नेटवर्क आते ही भेज देंगे ({n})", mr: "इंटरनेट नाही. नोंदी फोनमध्ये ठेवल्या आहेत ({n})", en: "No internet. Entries are kept on this phone and sent when you're back online ({n})" },
+    no_speech: { hi: "इस ब्राउज़र में आवाज़ नहीं चलती। Chrome खोलें या नीचे लिखें।", mr: "या ब्राउझरमध्ये आवाज चालत नाही. Chrome वापरा किंवा खाली लिहा.", en: "Voice isn't supported in this browser. Use Chrome, or type below." },
+    mic_denied: { hi: "माइक की अनुमति दीजिए।", mr: "माइकची परवानगी द्या.", en: "Please allow microphone access." },
+    didnt_hear: { hi: "कुछ सुनाई नहीं दिया। फिर से दबाइए।", mr: "काही ऐकू आले नाही. पुन्हा दाबा.", en: "Didn't catch anything. Tap again." },
+    tz_today: { hi: "आज", mr: "आज", en: "Today" },
+  };
+  const SPEECH_LANG = { hi: "hi-IN", mr: "mr-IN", en: "en-IN" };
+
+  // ------------------------------------------------------------ state
+  const S = {
+    lang: localStorage.getItem("bk_lang") || "hi",
+    ctx: null,              // follow-up context for the parser
+    pendingEntry: null,     // entry waiting for confirmation
+    timer: null,
+    rec: null,
+    listening: false,
+    config: {},
+  };
+  const $ = (s, r = document) => r.querySelector(s);
+  const t = (k, vars = {}) => (UI[k]?.[S.lang] ?? UI[k]?.hi ?? k).replace(/\{(\w+)\}/g, (_, v) => vars[v] ?? "");
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const inr = (x) => "₹" + Math.round(Math.abs(+x || 0)).toLocaleString("en-IN");
+
+  // ------------------------------------------------------------ api
+  async function api(path, opts = {}) {
+    const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts,
+      body: opts.body ? JSON.stringify(opts.body) : undefined });
+    if (!r.ok) throw new Error((await r.text()) || r.statusText);
+    return r.json();
+  }
+
+  // ------------------------------------------------------------ speech out
+  let voices = [];
+  const loadVoices = () => { voices = window.speechSynthesis ? speechSynthesis.getVoices() : []; };
+  if (window.speechSynthesis) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
+  function speak(text) {
+    return new Promise((resolve) => {
+      if (!window.speechSynthesis || !text) return resolve();
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      const want = SPEECH_LANG[S.lang];
+      u.lang = want;
+      u.voice = voices.find((v) => v.lang === want) || voices.find((v) => v.lang === "hi-IN") ||
+        voices.find((v) => v.lang?.startsWith("en-IN")) || null;
+      u.rate = 1.02;
+      let done = false;
+      const fin = () => { if (!done) { done = true; resolve(); } };
+      u.onend = fin; u.onerror = fin;
+      setTimeout(fin, Math.min(12000, 1500 + text.length * 90)); // never hang the flow
+      speechSynthesis.speak(u);
+    });
+  }
+
+  // ------------------------------------------------------------ speech in
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  function listen({ onInterim, short = false } = {}) {
+    return new Promise((resolve, reject) => {
+      if (!SR) return reject(new Error("nospeech"));
+      stopListening();
+      const rec = new SR();
+      rec.lang = SPEECH_LANG[S.lang];
+      rec.interimResults = true;
+      rec.continuous = false;
+      rec.maxAlternatives = 1;
+      let finalText = "";
+      rec.onresult = (ev) => {
+        let interim = "";
+        for (let i = ev.resultIndex; i < ev.results.length; i++) {
+          const r = ev.results[i];
+          if (r.isFinal) finalText += r[0].transcript; else interim += r[0].transcript;
+        }
+        onInterim && onInterim(finalText + interim);
+      };
+      rec.onerror = (ev) => { S.listening = false; setMic(false); reject(new Error(ev.error)); };
+      rec.onend = () => { S.listening = false; setMic(false); resolve(finalText.trim()); };
+      S.rec = rec; S.listening = true;
+      if (!short) setMic(true);
+      try { rec.start(); } catch (e) { reject(e); }
+    });
+  }
+  function stopListening() {
+    if (S.rec) { try { S.rec.abort(); } catch (_) {} S.rec = null; }
+    S.listening = false; setMic(false);
+  }
+  function setMic(on) {
+    const m = $("#mic"); if (!m) return;
+    m.classList.toggle("listening", on);
+    m.setAttribute("aria-pressed", on ? "true" : "false");
+    const h = $("#micHint"); if (h) h.textContent = on ? t("listening") : t("tap");
+  }
+
+  // ------------------------------------------------------------ offline queue
+  const Q_KEY = "bk_queue";
+  const queue = () => JSON.parse(localStorage.getItem(Q_KEY) || "[]");
+  const setQueue = (q) => { localStorage.setItem(Q_KEY, JSON.stringify(q)); renderOffline(); };
+  function renderOffline() {
+    const q = queue(); const el = $("#offline");
+    if (!navigator.onLine || q.length) { el.hidden = false; el.textContent = t("offline", { n: q.length }); }
+    else el.hidden = true;
+  }
+  async function flushQueue() {
+    if (!navigator.onLine) return;
+    const q = queue(); if (!q.length) return;
+    setQueue([]);
+    for (const item of q) { await handleText(item.text, { fromQueue: true }); await waitForSheetClose(); }
+  }
+  function waitForSheetClose() {
+    return new Promise((res) => { const iv = setInterval(() => { if ($("#sheet").hidden) { clearInterval(iv); res(); } }, 300); });
+  }
+  addEventListener("online", () => { renderOffline(); flushQueue(); });
+  addEventListener("offline", renderOffline);
+
+  // ------------------------------------------------------------ core flow
+  async function onMic() {
+    if (S.listening) { stopListening(); return; }
+    if (!SR) { showReply(t("no_speech")); $("#typeInput")?.focus(); return; }
+    speechSynthesis?.cancel();
+    $("#heard").textContent = "";
+    try {
+      const text = await listen({ onInterim: (s) => { $("#heard").textContent = s; } });
+      if (!text) { showReply(t("didnt_hear")); return; }
+      $("#heard").textContent = "“" + text + "”";
+      await handleText(text);
+    } catch (e) {
+      if (e.message === "not-allowed") showReply(t("mic_denied"));
+      else if (e.message === "network" && !navigator.onLine) showReply(t("offline", { n: queue().length }));
+      else if (e.message !== "aborted" && e.message !== "no-speech") showReply(t("didnt_hear"));
+      else if (e.message === "no-speech") showReply(t("didnt_hear"));
+    }
+  }
+
+  async function handleText(text, opts = {}) {
+    text = (text || "").trim();
+    if (!text) return;
+    if (!navigator.onLine) { setQueue([...queue(), { text, at: Date.now(), lang: S.lang }]); showReply(t("offline", { n: queue().length })); return; }
+    const hint = $("#micHint"); if (hint) hint.textContent = t("thinking");
+    let res;
+    try {
+      res = await api("/api/interpret", { method: "POST", body: { text, lang: S.lang, context: S.ctx } });
+    } catch (e) {
+      setQueue([...queue(), { text, at: Date.now(), lang: S.lang }]);
+      showReply(t("offline", { n: queue().length }));
+      return;
+    } finally { if (hint) hint.textContent = t("tap"); }
+    await route(res, text);
+  }
+
+  async function route(res, text) {
+    switch (res.kind) {
+      case "confirm":
+        S.ctx = null;
+        return openConfirm(res.entry, res.say);
+      case "clarify":
+        S.ctx = { awaiting: res.awaiting, ...res.pending };
+        showReply(res.say);
+        await speak(res.say);
+        return followUp();
+      case "choose":
+        S.ctx = null;
+        return openChoose(res);
+      case "undone":
+        S.ctx = null;
+        showReply(res.say); refreshHome(); return speak(res.say);
+      case "answer":
+        S.ctx = null;
+        showReply(res.say); return speak(res.say);
+      default:
+        S.ctx = null;
+        showReply(res.say || t("didnt_hear")); return speak(res.say);
+    }
+  }
+
+  async function followUp() {
+    // ask the missing piece and listen right away, hands-free
+    if (!SR) { $("#typeInput")?.focus(); return; }
+    try {
+      $("#heard").textContent = "";
+      const text = await listen({ onInterim: (s) => { $("#heard").textContent = s; } });
+      if (text) { $("#heard").textContent = "“" + text + "”"; await handleText(text); }
+      else S.ctx = null;
+    } catch (_) { /* user can tap the mic again; context is kept */ }
+  }
+
+  // ------------------------------------------------------------ confirmation sheet
+  function slipHTML(e) {
+    return `<div class="slip">
+      ${e.is_new ? `<div class="newbadge">${t("new_cust")}</div>` : ""}
+      <div class="s-name">${esc(e.name)}</div>
+      <div class="s-amt num ${e.type}">${inr(e.amount)}</div>
+      <span class="tag ${e.type}">${t(e.type)}</span>
+      ${e.note ? `<div class="s-note">${esc(e.note)}</div>` : ""}
+      ${e.transcript ? `<div class="s-heard">${t("heard")}: “${esc(e.transcript)}”</div>` : ""}
+    </div>`;
+  }
+
+  async function openConfirm(entry, sayText) {
+    S.pendingEntry = entry;
+    const card = $("#sheetCard");
+    card.innerHTML = `${slipHTML(entry)}
+      <div class="countdown" aria-hidden="true"><i id="cd"></i></div>
+      <div class="listen-note">${t("say_haan")}</div>
+      <div class="sheet-actions">
+        <button class="no" id="noBtn">${t("cancel")}</button>
+        <button class="yes" id="yesBtn">${t("save")}</button>
+      </div>
+      <button class="swap" id="swapBtn">${entry.type === "credit" ? t("swap_to_payment") : t("swap_to_credit")}</button>`;
+    $("#sheet").hidden = false;
+    $("#yesBtn").onclick = () => saveEntry();
+    $("#noBtn").onclick = () => rejectEntry();
+    $("#swapBtn").onclick = async () => {
+      clearTimer(); stopListening();
+      entry.type = entry.type === "credit" ? "payment" : "credit";
+      entry.type_defaulted = false;
+      const r = await api("/api/confirm-text", { method: "POST", body: { entry, lang: S.lang } });
+      openConfirm(entry, r.say);
+    };
+    $("#yesBtn").focus();
+    await speak(sayText);
+    if (S.pendingEntry !== entry) return;
+    startCountdown(entry);
+    listenYesNo(entry);
+  }
+
+  function startCountdown(entry) {
+    clearTimer();
+    const bar = $("#cd"); const total = 5000; const start = Date.now();
+    S.timer = setInterval(() => {
+      const left = Math.max(0, total - (Date.now() - start));
+      if (bar) bar.style.width = (left / total * 100) + "%";
+      if (left <= 0) { clearTimer(); if (S.pendingEntry === entry) saveEntry(); }
+    }, 100);
+  }
+  function clearTimer() { if (S.timer) { clearInterval(S.timer); S.timer = null; } }
+
+  async function listenYesNo(entry) {
+    if (!SR) return;
+    try {
+      const text = await listen({ short: true });
+      if (S.pendingEntry !== entry || !text) return;
+      const r = await api("/api/interpret", { method: "POST", body: { text, lang: S.lang, context: { awaiting: "confirm" } } });
+      if (S.pendingEntry !== entry) return;
+      if (r.kind === "yes") saveEntry();
+      else if (r.kind === "no") rejectEntry(r.say);
+      else if (r.kind === "confirm" || r.kind === "clarify") { // user corrected themselves
+        clearTimer(); closeSheet(); route(r, text);
+      }
+    } catch (_) { /* countdown still runs */ }
+  }
+
+  async function saveEntry() {
+    const e = S.pendingEntry; if (!e) return;
+    S.pendingEntry = null; clearTimer(); stopListening(); closeSheet();
+    try {
+      const r = await api("/api/entries", { method: "POST", body: {
+        customer_id: e.customer_id, name: e.name, amount: e.amount, type: e.type,
+        note: e.note, transcript: e.transcript, lang: S.lang, source: "voice" } });
+      showReply(r.say);
+      toast(r.say, async () => {
+        await api(`/api/entries/${r.entry.id}/cancel`, { method: "POST" });
+        showReply(t("undone")); refreshAll();
+      });
+      refreshAll();
+      speak(r.say);
+    } catch (err) {
+      setQueue([...queue(), { text: e.transcript || `${e.name} ${e.amount} ${e.type === "credit" ? "udhaar" : "jama"}`, at: Date.now() }]);
+      showReply(t("offline", { n: queue().length }));
+    }
+  }
+  function rejectEntry(sayText) {
+    S.pendingEntry = null; clearTimer(); stopListening(); closeSheet();
+    const msg = sayText || { hi: "ठीक है, सेव नहीं किया।", mr: "ठीक आहे, सेव्ह केले नाही.", en: "Okay, not saved." }[S.lang];
+    showReply(msg); speak(msg);
+  }
+  function closeSheet() { $("#sheet").hidden = true; $("#sheetCard").innerHTML = ""; }
+  $("#sheet").addEventListener("click", (ev) => { if (ev.target.id === "sheet") { S.pendingEntry = null; clearTimer(); stopListening(); closeSheet(); } });
+  addEventListener("keydown", (ev) => { if (ev.key === "Escape" && !$("#sheet").hidden) { S.pendingEntry = null; clearTimer(); stopListening(); closeSheet(); } });
+
+  // ------------------------------------------------------------ choose sheet
+  async function openChoose(res) {
+    const card = $("#sheetCard");
+    const pending = res.pending;
+    card.innerHTML = `<div class="sheet-q">${esc(res.say)}</div>
+      <div class="choices">
+        ${res.candidates.map((c) => `<button data-id="${c.id}"><span>${esc(c.name)}</span><span class="num">${inr(c.balance)}</span></button>`).join("")}
+        ${res.for === "entry" ? `<button data-new="1"><span>${esc(t("new_with_name", { name: pending.name }))}</span><span>＋</span></button>` : ""}
+      </div>`;
+    $("#sheet").hidden = false;
+    card.querySelectorAll("button").forEach((b) => b.onclick = async () => {
+      closeSheet();
+      if (res.for === "balance") { location.hash = `#/c/${b.dataset.id}`; return; }
+      const c = res.candidates.find((x) => String(x.id) === b.dataset.id);
+      const entry = b.dataset.new ? { ...pending, customer_id: null, is_new: true }
+        : { ...pending, customer_id: c.id, name: c.name, is_new: false };
+      const r = await api("/api/confirm-text", { method: "POST", body: { entry, lang: S.lang } });
+      openConfirm(entry, r.say);
+    });
+    speak(res.say);
+  }
+
+  // ------------------------------------------------------------ toast + reply
+  let toastTimer;
+  function toast(msg, onUndo) {
+    const el = $("#toast");
+    el.innerHTML = `<span>${esc(msg)}</span>${onUndo ? `<button id="undoBtn">${t("undo")}</button>` : ""}`;
+    el.hidden = false;
+    if (onUndo) $("#undoBtn").onclick = () => { el.hidden = true; onUndo(); };
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.hidden = true; }, 30000); // 30s undo window
+  }
+  function showReply(msg) {
+    const el = $("#reply"); if (!el) return;
+    el.textContent = msg; el.hidden = !msg;
+  }
+
+  // ------------------------------------------------------------ views
+  const micSVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></svg>`;
+
+  function when(ts) {
+    const d = new Date(ts.replace(" ", "T"));
+    const today = new Date();
+    const time = d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
+    if (d.toDateString() === today.toDateString()) return `${t("tz_today")}<br>${time}`;
+    return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" }) + `<br>${time}`;
+  }
+  function rowHTML(e, showName = true) {
+    return `<li class="${e.status === "cancelled" ? "cancelled" : ""}">
+      <span class="when num">${when(e.created_at)}</span>
+      <span class="who">${showName ? `<a href="#/c/${e.customer_id}">${esc(e.customer_name)}</a>` : t(e.type)}
+        <small>${showName ? t(e.type) : ""}${e.note ? (showName ? " · " : "") + esc(e.note) : ""}
+        ${!showName && e.status === "active" ? `<button class="mini-undo" data-cancel="${e.id}">${t("cancel_entry")}</button>` : ""}</small></span>
+      <span class="val num ${e.type}">${e.type === "credit" ? "+" : "−"}${inr(e.amount)}</span>
+    </li>`;
+  }
+
+  async function viewHome() {
+    $("#view").innerHTML = `
+      <section class="today" aria-label="today">
+        <div><div class="lbl">${t("today_given")}</div><div class="amt credit num" id="tGiven">—</div></div>
+        <div><div class="lbl">${t("today_got")}</div><div class="amt payment num" id="tGot">—</div></div>
+      </section>
+      <p class="pending-line" id="pendingLine"></p>
+      <section class="mic-wrap">
+        <button class="mic" id="mic" aria-label="${t("tap")}" aria-pressed="false">${micSVG}</button>
+        <div class="mic-hint" id="micHint">${t("tap")}</div>
+        <div class="heard" id="heard"></div>
+        <div class="examples">${UI.examples[S.lang]}</div>
+        <form class="typebox" id="typeForm" autocomplete="off">
+          <input id="typeInput" placeholder="${t("type_here")}" aria-label="${t("type_here")}">
+          <button>${t("go")}</button>
+        </form>
+      </section>
+      <div class="reply" id="reply" hidden role="status"></div>
+      <h2>${t("recent")}</h2>
+      <ul class="ledger" id="recent"></ul>`;
+    $("#mic").onclick = onMic;
+    $("#typeForm").onsubmit = (ev) => {
+      ev.preventDefault();
+      const v = $("#typeInput").value; $("#typeInput").value = "";
+      $("#heard").textContent = v ? "“" + v + "”" : ""; handleText(v);
+    };
+    if (!SR) showReply(t("no_speech"));
+    refreshHome();
+  }
+
+  async function refreshHome() {
+    if (!$("#recent")) return;
+    try {
+      const s = await api("/api/summary");
+      $("#tGiven").textContent = inr(s.today_given);
+      $("#tGot").textContent = inr(s.today_collected);
+      $("#pendingLine").innerHTML = `${t("pending")}: <b class="num">${inr(s.outstanding)}</b>, ${t("from_n", { n: s.customers_due })}`;
+      $("#recent").innerHTML = s.recent.length ? s.recent.map((e) => rowHTML(e)).join("") : `<li class="empty" style="display:block">${t("no_entries")}</li>`;
+    } catch (_) { /* offline: keep what is shown */ }
+  }
+
+  async function viewCustomers() {
+    $("#view").innerHTML = `<h2 style="margin-top:4px">${t("customers")}</h2>
+      <input class="search" id="search" placeholder="${t("search")}" aria-label="${t("search")}">
+      <ul class="ledger" id="clist" style="margin-top:12px"></ul>`;
+    const render = async (q) => {
+      const list = await api("/api/customers" + (q ? `?q=${encodeURIComponent(q)}` : ""));
+      $("#clist").innerHTML = list.map((c) => `<li class="cust"><a href="#/c/${c.id}" class="who">${esc(c.name)}
+        <small>${c.last_at ? when(c.last_at).replace("<br>", ", ") : ""}</small></a>
+        <span class="val num ${c.balance > 0 ? "credit" : "payment"}">${c.balance > 0 ? inr(c.balance) : (c.balance < 0 ? t("advance") + " " + inr(c.balance) : t("clear"))}</span></li>`).join("");
+    };
+    $("#search").oninput = (ev) => render(ev.target.value.trim());
+    render();
+  }
+
+  async function viewCustomer(id) {
+    const c = await api(`/api/customers/${id}?lang=${S.lang}`);
+    const due = c.balance > 0;
+    $("#view").innerHTML = `
+      <button class="back" onclick="history.back()">${t("back")}</button>
+      <div class="cust-head">
+        <h1>${esc(c.name)}</h1>
+        <div class="bal num ${due ? "due" : "clear"}">${due ? inr(c.balance) : (c.balance < 0 ? t("advance") + " " + inr(c.balance) : t("clear"))}</div>
+        ${due ? `<div class="lbl">${t("owes")}</div>` : ""}
+      </div>
+      <div class="actions">
+        ${due ? `<a class="btn wa" href="${c.whatsapp_url}" target="_blank" rel="noopener">💬 ${t("remind")}</a>` : ""}
+      </div>
+      <form class="phone" id="phoneForm">
+        <input id="phone" inputmode="tel" placeholder="${t("phone")}" value="${esc(c.phone || "")}" aria-label="${t("phone")}">
+        <button class="btn ghost">${t("save_phone")}</button>
+      </form>
+      <h2>${t("history")}</h2>
+      <ul class="ledger">${c.entries.map((e) => rowHTML(e, false)).join("") || `<li class="empty" style="display:block">—</li>`}</ul>`;
+    $("#phoneForm").onsubmit = async (ev) => {
+      ev.preventDefault();
+      await api(`/api/customers/${id}`, { method: "PATCH", body: { phone: $("#phone").value.trim() } });
+      viewCustomer(id);
+    };
+    $("#view").querySelectorAll("[data-cancel]").forEach((b) => b.onclick = async () => {
+      await api(`/api/entries/${b.dataset.cancel}/cancel`, { method: "POST" });
+      viewCustomer(id);
+    });
+  }
+
+  function refreshAll() {
+    const h = location.hash;
+    if (h.startsWith("#/c/")) viewCustomer(h.split("/")[2]);
+    else if (h === "#/customers") viewCustomers();
+    else refreshHome();
+  }
+
+  // ------------------------------------------------------------ router + chrome
+  function router() {
+    stopListening();
+    const h = location.hash || "#/";
+    document.querySelectorAll(".tabs a").forEach((a) => a.classList.toggle("on",
+      (a.dataset.tab === "home" && (h === "#/" || h === "")) || (a.dataset.tab === "customers" && h !== "#/")));
+    if (h.startsWith("#/c/")) return viewCustomer(h.split("/")[2]);
+    if (h === "#/customers") return viewCustomers();
+    return viewHome();
+  }
+  function applyLang() {
+    document.documentElement.lang = S.lang === "en" ? "en" : S.lang;
+    document.querySelectorAll(".langs button").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.lang === S.lang)));
+    document.querySelectorAll("[data-t]").forEach((el) => { el.textContent = t(el.dataset.t); });
+    renderOffline();
+  }
+  document.querySelectorAll(".langs button").forEach((b) => b.onclick = () => {
+    S.lang = b.dataset.lang; localStorage.setItem("bk_lang", S.lang); applyLang(); router();
+  });
+
+  // Space bar = press the mic (handy on a counter laptop)
+  addEventListener("keydown", (ev) => {
+    if (ev.code === "Space" && document.activeElement?.tagName !== "INPUT" && $("#mic") && $("#sheet").hidden) { ev.preventDefault(); onMic(); }
+  });
+
+  addEventListener("hashchange", router);
+  (async () => {
+    try { S.config = await api("/api/config"); $("#shopName").textContent = S.config.shop_name; } catch (_) {}
+    if (!localStorage.getItem("bk_lang") && S.config.default_lang) S.lang = S.config.default_lang;
+    applyLang(); router(); flushQueue();
+    if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+  })();
+
+  // exposed for the demo / tests
+  window.BoloKhata = { handleText, speak };
+})();

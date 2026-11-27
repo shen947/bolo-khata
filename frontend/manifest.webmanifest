@@ -1,0 +1,10 @@
+{
+  "name": "Bolo Khata — बोलो खाता",
+  "short_name": "Bolo Khata",
+  "description": "Voice-first udhaar ledger for kirana shops. Speak once, it's recorded.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#A51C24",
+  "icons": [{ "src": "/static/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
