@@ -92,16 +92,20 @@ def reset_for_tests(path):
 
 
 # ------------------------------------------------------------------ customers
-# Constant SQL fragment (no user input) reused by the queries below.
-BALANCE_SQL = ("COALESCE(SUM(CASE WHEN e.status='active' AND e.type='credit' THEN e.amount "
-               "WHEN e.status='active' AND e.type='payment' THEN -e.amount ELSE 0 END),0)")
-# Both queries are assembled once, at import, from constants only. User values go through "?" params.
-LIST_CUSTOMERS_SQL = ("SELECT c.id, c.name, c.phone, " + BALANCE_SQL + " AS balance, "
-                      "MAX(CASE WHEN e.status='active' THEN e.created_at END) AS last_at "
-                      "FROM customers c LEFT JOIN entries e ON e.customer_id=c.id "
-                      "GROUP BY c.id ORDER BY balance DESC, c.name")
-GET_CUSTOMER_SQL = ("SELECT c.id, c.name, c.phone, c.created_at, " + BALANCE_SQL + " AS balance "
-                    "FROM customers c LEFT JOIN entries e ON e.customer_id=c.id WHERE c.id=? GROUP BY c.id")
+# Plain SQL literals: nothing is assembled at runtime; user values only go through "?" params.
+LIST_CUSTOMERS_SQL = """
+SELECT c.id, c.name, c.phone,
+       COALESCE(SUM(CASE WHEN e.status='active' AND e.type='credit' THEN e.amount WHEN e.status='active' AND e.type='payment' THEN -e.amount ELSE 0 END),0) AS balance,
+       MAX(CASE WHEN e.status='active' THEN e.created_at END) AS last_at
+FROM customers c LEFT JOIN entries e ON e.customer_id=c.id
+GROUP BY c.id ORDER BY balance DESC, c.name
+"""
+GET_CUSTOMER_SQL = """
+SELECT c.id, c.name, c.phone, c.created_at,
+       COALESCE(SUM(CASE WHEN e.status='active' AND e.type='credit' THEN e.amount WHEN e.status='active' AND e.type='payment' THEN -e.amount ELSE 0 END),0) AS balance
+FROM customers c LEFT JOIN entries e ON e.customer_id=c.id
+WHERE c.id=? GROUP BY c.id
+"""
 
 
 def list_customers(q=None):
