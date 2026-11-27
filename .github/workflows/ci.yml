@@ -1,0 +1,37 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -r backend/requirements-dev.txt
+      - name: Tests
+        working-directory: backend
+        run: pytest -q
+      - name: Static security scan (bandit)
+        run: bandit -q -r backend/app -ll
+      - name: Dependency vulnerabilities (pip-audit)
+        run: pip-audit -r backend/requirements.txt
+      - name: JS syntax
+        run: node --check frontend/app.js && node --check frontend/sw.js
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker compose up smoke test
+        run: |
+          docker compose up -d --build
+          for i in $(seq 1 30); do curl -fs localhost:8000/api/health && break; sleep 2; done
+          curl -fs localhost:8000/ | grep -q "बोलो खाता"
+          curl -fsI localhost:8000/ | grep -qi "content-security-policy"
+          docker compose exec -T app id -u | grep -q 10001
+          docker compose down

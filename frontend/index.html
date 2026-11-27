@@ -7,9 +7,6 @@
   <title>Bolo Khata · बोलो खाता</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Mukta:wght@400;600;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
@@ -34,6 +31,7 @@
   <nav class="tabs">
     <a href="#/" data-tab="home"><span class="ti">🎙</span><span data-t="nav_home"></span></a>
     <a href="#/customers" data-tab="customers"><span class="ti">📒</span><span data-t="nav_khata"></span></a>
+    <a href="#/settings" data-tab="settings"><span class="ti">⚙️</span><span data-t="nav_settings"></span></a>
   </nav>
 
   <!-- confirmation / question sheet -->
@@ -42,6 +40,6 @@
   </div>
   <div id="toast" class="toast" hidden></div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js" defer></script>
 </body>
 </html>

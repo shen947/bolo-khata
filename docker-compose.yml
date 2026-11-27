@@ -2,16 +2,32 @@ services:
   app:
     build: .
     ports:
+      # Reachable from phones on the shop Wi-Fi. To keep it on this computer only,
+      # use "127.0.0.1:8000:8000". Set a PIN in Settings either way.
       - "8000:8000"
     environment:
       SHOP_NAME: ${SHOP_NAME:-Singh General Store}
       DEFAULT_LANG: ${DEFAULT_LANG:-hi}
       SEED_DEMO: ${SEED_DEMO:-true}
+      STORE_TRANSCRIPTS: ${STORE_TRANSCRIPTS:-true}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-240}
+      ENABLE_API_DOCS: ${ENABLE_API_DOCS:-false}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
       LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
     volumes:
       - khata-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
     restart: unless-stopped
 volumes:
   khata-data:

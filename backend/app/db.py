@@ -8,7 +8,8 @@ from difflib import SequenceMatcher
 from .lang import name_key
 
 DB_PATH = os.getenv("DB_PATH", os.path.join(os.path.dirname(__file__), "..", "data", "khata.db"))
-_lock = threading.Lock()
+_lock = threading.RLock()
+STORE_TRANSCRIPTS = os.getenv("STORE_TRANSCRIPTS", "true").lower() in ("1", "true", "yes")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS customers (
@@ -39,6 +40,14 @@ CREATE TABLE IF NOT EXISTS audit (
   detail TEXT,
   at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,
+  expires_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_entries_customer ON entries(customer_id);
 CREATE INDEX IF NOT EXISTS idx_entries_created ON entries(created_at);
 """
@@ -53,6 +62,9 @@ def connect():
     con = sqlite3.connect(DB_PATH, check_same_thread=False)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
+    con.execute("PRAGMA journal_mode = WAL")      # crash-safe, readers don't block the writer
+    con.execute("PRAGMA busy_timeout = 5000")
+    con.execute("PRAGMA secure_delete = ON")      # cancelled data is overwritten on disk
     return con
 
 
@@ -62,11 +74,14 @@ CON = None
 def get():
     global CON
     if CON is None:
-        CON = connect()
-        CON.executescript(SCHEMA)
-        if os.getenv("SEED_DEMO", "true").lower() in ("1", "true", "yes"):
-            if CON.execute("SELECT COUNT(*) FROM customers").fetchone()[0] == 0:
-                seed(CON)
+        with _lock:
+            if CON is None:
+                con = connect()
+                con.executescript(SCHEMA)
+                if os.getenv("SEED_DEMO", "true").lower() in ("1", "true", "yes"):
+                    if con.execute("SELECT COUNT(*) FROM customers").fetchone()[0] == 0:
+                        seed(con)
+                CON = con
     return CON
 
 
@@ -77,19 +92,22 @@ def reset_for_tests(path):
 
 
 # ------------------------------------------------------------------ customers
-def balance_sql():
-    return ("COALESCE(SUM(CASE WHEN e.status='active' AND e.type='credit' THEN e.amount "
-            "WHEN e.status='active' AND e.type='payment' THEN -e.amount ELSE 0 END),0)")
+# Constant SQL fragment (no user input) reused by the queries below.
+BALANCE_SQL = ("COALESCE(SUM(CASE WHEN e.status='active' AND e.type='credit' THEN e.amount "
+               "WHEN e.status='active' AND e.type='payment' THEN -e.amount ELSE 0 END),0)")
+# Both queries are assembled once, at import, from constants only. User values go through "?" params.
+LIST_CUSTOMERS_SQL = ("SELECT c.id, c.name, c.phone, " + BALANCE_SQL + " AS balance, "
+                      "MAX(CASE WHEN e.status='active' THEN e.created_at END) AS last_at "
+                      "FROM customers c LEFT JOIN entries e ON e.customer_id=c.id "
+                      "GROUP BY c.id ORDER BY balance DESC, c.name")
+GET_CUSTOMER_SQL = ("SELECT c.id, c.name, c.phone, c.created_at, " + BALANCE_SQL + " AS balance "
+                    "FROM customers c LEFT JOIN entries e ON e.customer_id=c.id WHERE c.id=? GROUP BY c.id")
 
 
 def list_customers(q=None):
     con = get()
     rows = con.execute(
-        f"""SELECT c.id, c.name, c.phone, {balance_sql()} AS balance,
-                   MAX(CASE WHEN e.status='active' THEN e.created_at END) AS last_at
-            FROM customers c LEFT JOIN entries e ON e.customer_id=c.id
-            GROUP BY c.id ORDER BY balance DESC, c.name"""
-    ).fetchall()
+        LIST_CUSTOMERS_SQL).fetchall()
     out = [dict(r) for r in rows]
     if q:
         k = name_key(q)
@@ -100,9 +118,7 @@ def list_customers(q=None):
 def get_customer(cid):
     con = get()
     r = con.execute(
-        f"""SELECT c.id, c.name, c.phone, c.created_at, {balance_sql()} AS balance
-            FROM customers c LEFT JOIN entries e ON e.customer_id=c.id
-            WHERE c.id=? GROUP BY c.id""", (cid,)).fetchone()
+        GET_CUSTOMER_SQL, (cid,)).fetchone()
     return dict(r) if r else None
 
 
@@ -176,9 +192,10 @@ def add_entry(customer_id, amount, type_, note=None, transcript=None, lang=None,
         cur = con.execute(
             """INSERT INTO entries(customer_id, amount, type, note, transcript, lang, source, created_at)
                VALUES (?,?,?,?,?,?,?,?)""",
-            (customer_id, float(amount), type_, note, transcript, lang, source, created_at or now()))
+            (customer_id, round(float(amount), 2), type_, note, transcript if STORE_TRANSCRIPTS else None,
+             lang, source, created_at or now()))
         con.execute("INSERT INTO audit(entry_id, customer_id, action, detail, at) VALUES (?,?,?,?,?)",
-                    (cur.lastrowid, customer_id, "entry_created", f"{type_} {amount} :: {transcript or ''}", now()))
+                    (cur.lastrowid, customer_id, "entry_created", f"{type_} {amount}", now()))
         con.commit()
     return get_entry(cur.lastrowid)
 
@@ -237,6 +254,67 @@ def today_credit_customers():
         """SELECT c.id, c.name, SUM(e.amount) AS amount FROM entries e JOIN customers c ON c.id=e.customer_id
            WHERE e.status='active' AND e.type='credit' AND substr(e.created_at,1,10)=?
            GROUP BY c.id ORDER BY amount DESC""", (today,))]
+
+
+# ------------------------------------------------------------------ settings / sessions
+def get_setting(key, default=None):
+    with _lock:
+        r = get().execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    return r["value"] if r else default
+
+
+def set_setting(key, value):
+    con = get()
+    with _lock:
+        if value is None:
+            con.execute("DELETE FROM settings WHERE key=?", (key,))
+        else:
+            con.execute("INSERT INTO settings(key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+        con.execute("INSERT INTO audit(action, detail, at) VALUES (?,?,?)", ("setting_changed", key, now()))
+        con.commit()
+
+
+def add_session(token_hash, expires_at):
+    con = get()
+    with _lock:
+        con.execute("DELETE FROM sessions WHERE expires_at < ?", (now(),))
+        con.execute("INSERT INTO sessions(token_hash, expires_at) VALUES (?,?)", (token_hash, expires_at))
+        con.commit()
+
+
+def session_valid(token_hash, at):
+    with _lock:
+        r = get().execute("SELECT 1 FROM sessions WHERE token_hash=? AND expires_at > ?", (token_hash, at)).fetchone()
+    return bool(r)
+
+
+def delete_session(token_hash):
+    con = get()
+    with _lock:
+        con.execute("DELETE FROM sessions WHERE token_hash=?", (token_hash,))
+        con.commit()
+
+
+def clear_sessions():
+    con = get()
+    with _lock:
+        con.execute("DELETE FROM sessions")
+        con.commit()
+
+
+def export_rows():
+    with _lock:
+        return [dict(r) for r in get().execute(
+            """SELECT e.id, e.created_at, c.name AS customer, c.phone, e.type, e.amount, e.note, e.status,
+                      e.cancelled_at, e.lang, e.source
+               FROM entries e JOIN customers c ON c.id=e.customer_id ORDER BY e.created_at, e.id""")]
+
+
+def add_audit(action, detail=None):
+    con = get()
+    with _lock:
+        con.execute("INSERT INTO audit(action, detail, at) VALUES (?,?,?)", (action, detail, now()))
+        con.commit()
 
 
 def audit_log(limit=100):

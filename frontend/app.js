@@ -51,6 +51,30 @@
     mic_denied: { hi: "माइक की अनुमति दीजिए।", mr: "माइकची परवानगी द्या.", en: "Please allow microphone access." },
     didnt_hear: { hi: "कुछ सुनाई नहीं दिया। फिर से दबाइए।", mr: "काही ऐकू आले नाही. पुन्हा दाबा.", en: "Didn't catch anything. Tap again." },
     tz_today: { hi: "आज", mr: "आज", en: "Today" },
+    nav_settings: { hi: "सेटिंग", mr: "सेटिंग", en: "Settings" },
+    lock_title: { hi: "PIN डालिए", mr: "PIN टाका", en: "Enter PIN" },
+    lock_wrong: { hi: "गलत PIN", mr: "चुकीचा PIN", en: "Wrong PIN" },
+    lock_wait: { hi: "बहुत बार गलत PIN। {s} सेकंड बाद कोशिश करें।", mr: "खूप वेळा चुकीचा PIN. {s} सेकंदांनी प्रयत्न करा.", en: "Too many wrong PINs. Try again in {s} seconds." },
+    unlock: { hi: "खोलें", mr: "उघडा", en: "Open" },
+    set_shop: { hi: "दुकान का नाम", mr: "दुकानाचे नाव", en: "Shop name" },
+    set_shop_help: { hi: "WhatsApp याद-संदेश में यही नाम जाएगा।", mr: "WhatsApp आठवणीत हेच नाव जाईल.", en: "Used in WhatsApp reminders." },
+    set_pin: { hi: "PIN लॉक", mr: "PIN लॉक", en: "PIN lock" },
+    set_pin_off: { hi: "अभी कोई PIN नहीं है। कोई भी इस फ़ोन/लिंक से खाता देख सकता है। 4–8 अंकों का PIN लगाइए।", mr: "सध्या PIN नाही. 4–8 अंकी PIN लावा.", en: "No PIN yet: anyone with this phone or link can open the ledger. Set a 4–8 digit PIN." },
+    set_pin_on: { hi: "PIN चालू है। बदलने या हटाने के लिए पुराना PIN चाहिए।", mr: "PIN चालू आहे. बदलण्यासाठी जुना PIN लागेल.", en: "PIN is on. Changing or removing it needs the current PIN." },
+    cur_pin: { hi: "पुराना PIN", mr: "जुना PIN", en: "Current PIN" },
+    new_pin: { hi: "नया PIN", mr: "नवीन PIN", en: "New PIN" },
+    pin_set: { hi: "PIN लगाएँ", mr: "PIN लावा", en: "Set PIN" },
+    pin_change: { hi: "PIN बदलें", mr: "PIN बदला", en: "Change PIN" },
+    pin_remove: { hi: "PIN हटाएँ", mr: "PIN काढा", en: "Remove PIN" },
+    lock_now: { hi: "अभी लॉक करें", mr: "आता लॉक करा", en: "Lock now" },
+    saved_ok: { hi: "सेव हो गया", mr: "सेव्ह झाले", en: "Saved" },
+    pin_bad: { hi: "PIN 4 से 8 अंकों का होना चाहिए", mr: "PIN 4 ते 8 अंकी हवा", en: "PIN must be 4 to 8 digits" },
+    set_export: { hi: "हिसाब डाउनलोड करें", mr: "हिशोब डाउनलोड करा", en: "Download your ledger" },
+    set_export_help: { hi: "पूरा हिसाब CSV फ़ाइल में (Excel में खुलता है)। आपका डेटा आपका है।", mr: "संपूर्ण हिशोब CSV फाइलमध्ये (Excel मध्ये उघडते).", en: "Every entry as a CSV file that opens in Excel. Your data stays yours." },
+    export_btn: { hi: "CSV डाउनलोड", mr: "CSV डाउनलोड", en: "Download CSV" },
+    set_privacy: { hi: "निजता", mr: "गोपनीयता", en: "Privacy" },
+    set_privacy_help: { hi: "आवाज़ रिकॉर्ड या सेव नहीं होती, सिर्फ़ लिखा हुआ वाक्य। सारा डेटा आपके अपने सर्वर पर रहता है।", mr: "आवाज रेकॉर्ड होत नाही, फक्त लिहिलेले वाक्य. सर्व डेटा तुमच्या सर्व्हरवर राहतो.", en: "Audio is never recorded or stored, only the recognised sentence. All data stays on your own server." },
+
   };
   const SPEECH_LANG = { hi: "hi-IN", mr: "mr-IN", en: "en-IN" };
 
@@ -73,7 +97,12 @@
   async function api(path, opts = {}) {
     const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts,
       body: opts.body ? JSON.stringify(opts.body) : undefined });
-    if (!r.ok) throw new Error((await r.text()) || r.statusText);
+    if (r.status === 401 && !path.startsWith("/api/auth/")) { showLock(); throw new Error("locked"); }
+    if (!r.ok) {
+      let detail = r.statusText;
+      try { const j = await r.json(); detail = j.detail || detail; if (j.retry_after) detail += "|" + j.retry_after; } catch (_) {}
+      const err = new Error(detail); err.status = r.status; throw err;
+    }
     return r.json();
   }
 
@@ -150,7 +179,7 @@
     if (!navigator.onLine) return;
     const q = queue(); if (!q.length) return;
     setQueue([]);
-    for (const item of q) { await handleText(item.text, { fromQueue: true }); await waitForSheetClose(); }
+    for (const item of q) { await handleText(item.text, { source: "offline" }); await waitForSheetClose(); }
   }
   function waitForSheetClose() {
     return new Promise((res) => { const iv = setInterval(() => { if ($("#sheet").hidden) { clearInterval(iv); res(); } }, 300); });
@@ -178,6 +207,7 @@
   }
 
   async function handleText(text, opts = {}) {
+    S.lastSource = opts.source || "voice";
     text = (text || "").trim();
     if (!text) return;
     if (!navigator.onLine) { setQueue([...queue(), { text, at: Date.now(), lang: S.lang }]); showReply(t("offline", { n: queue().length })); return; }
@@ -186,6 +216,8 @@
     try {
       res = await api("/api/interpret", { method: "POST", body: { text, lang: S.lang, context: S.ctx } });
     } catch (e) {
+      if (e.message === "locked") return;
+      if (e.status && e.status < 500) { showReply(t("didnt_hear")); return; }
       setQueue([...queue(), { text, at: Date.now(), lang: S.lang }]);
       showReply(t("offline", { n: queue().length }));
       return;
@@ -301,7 +333,7 @@
     try {
       const r = await api("/api/entries", { method: "POST", body: {
         customer_id: e.customer_id, name: e.name, amount: e.amount, type: e.type,
-        note: e.note, transcript: e.transcript, lang: S.lang, source: "voice" } });
+        note: e.note, transcript: e.transcript, lang: S.lang, source: S.lastSource || "voice" } });
       showReply(r.say);
       toast(r.say, async () => {
         await api(`/api/entries/${r.entry.id}/cancel`, { method: "POST" });
@@ -310,6 +342,7 @@
       refreshAll();
       speak(r.say);
     } catch (err) {
+      if (err.message === "locked") return;
       setQueue([...queue(), { text: e.transcript || `${e.name} ${e.amount} ${e.type === "credit" ? "udhaar" : "jama"}`, at: Date.now() }]);
       showReply(t("offline", { n: queue().length }));
     }
@@ -393,7 +426,7 @@
         <div class="heard" id="heard"></div>
         <div class="examples">${UI.examples[S.lang]}</div>
         <form class="typebox" id="typeForm" autocomplete="off">
-          <input id="typeInput" placeholder="${t("type_here")}" aria-label="${t("type_here")}">
+          <input id="typeInput" maxlength="300" placeholder="${t("type_here")}" aria-label="${t("type_here")}">
           <button>${t("go")}</button>
         </form>
       </section>
@@ -404,7 +437,7 @@
     $("#typeForm").onsubmit = (ev) => {
       ev.preventDefault();
       const v = $("#typeInput").value; $("#typeInput").value = "";
-      $("#heard").textContent = v ? "“" + v + "”" : ""; handleText(v);
+      $("#heard").textContent = v ? "“" + v + "”" : ""; handleText(v, { source: "typed" });
     };
     if (!SR) showReply(t("no_speech"));
     refreshHome();
@@ -417,14 +450,14 @@
       $("#tGiven").textContent = inr(s.today_given);
       $("#tGot").textContent = inr(s.today_collected);
       $("#pendingLine").innerHTML = `${t("pending")}: <b class="num">${inr(s.outstanding)}</b>, ${t("from_n", { n: s.customers_due })}`;
-      $("#recent").innerHTML = s.recent.length ? s.recent.map((e) => rowHTML(e)).join("") : `<li class="empty" style="display:block">${t("no_entries")}</li>`;
+      $("#recent").innerHTML = s.recent.length ? s.recent.map((e) => rowHTML(e)).join("") : `<li class="empty empty-row">${t("no_entries")}</li>`;
     } catch (_) { /* offline: keep what is shown */ }
   }
 
   async function viewCustomers() {
-    $("#view").innerHTML = `<h2 style="margin-top:4px">${t("customers")}</h2>
-      <input class="search" id="search" placeholder="${t("search")}" aria-label="${t("search")}">
-      <ul class="ledger" id="clist" style="margin-top:12px"></ul>`;
+    $("#view").innerHTML = `<h2 class="h-tight">${t("customers")}</h2>
+      <input class="search" id="search" maxlength="60" placeholder="${t("search")}" aria-label="${t("search")}">
+      <ul class="ledger list-gap" id="clist"></ul>`;
     const render = async (q) => {
       const list = await api("/api/customers" + (q ? `?q=${encodeURIComponent(q)}` : ""));
       $("#clist").innerHTML = list.map((c) => `<li class="cust"><a href="#/c/${c.id}" class="who">${esc(c.name)}
@@ -439,30 +472,130 @@
     const c = await api(`/api/customers/${id}?lang=${S.lang}`);
     const due = c.balance > 0;
     $("#view").innerHTML = `
-      <button class="back" onclick="history.back()">${t("back")}</button>
+      <button class="back" id="backBtn">${t("back")}</button>
       <div class="cust-head">
         <h1>${esc(c.name)}</h1>
         <div class="bal num ${due ? "due" : "clear"}">${due ? inr(c.balance) : (c.balance < 0 ? t("advance") + " " + inr(c.balance) : t("clear"))}</div>
         ${due ? `<div class="lbl">${t("owes")}</div>` : ""}
       </div>
       <div class="actions">
-        ${due ? `<a class="btn wa" href="${c.whatsapp_url}" target="_blank" rel="noopener">💬 ${t("remind")}</a>` : ""}
+        ${due ? `<a class="btn wa" href="${esc(c.whatsapp_url)}" target="_blank" rel="noopener noreferrer">💬 ${t("remind")}</a>` : ""}
       </div>
       <form class="phone" id="phoneForm">
-        <input id="phone" inputmode="tel" placeholder="${t("phone")}" value="${esc(c.phone || "")}" aria-label="${t("phone")}">
+        <input id="phone" inputmode="tel" maxlength="20" pattern="\\+?[0-9][0-9 \\-]{6,18}" placeholder="${t("phone")}" value="${esc(c.phone || "")}" aria-label="${t("phone")}">
         <button class="btn ghost">${t("save_phone")}</button>
       </form>
       <h2>${t("history")}</h2>
-      <ul class="ledger">${c.entries.map((e) => rowHTML(e, false)).join("") || `<li class="empty" style="display:block">—</li>`}</ul>`;
+      <ul class="ledger">${c.entries.map((e) => rowHTML(e, false)).join("") || `<li class="empty empty-row">—</li>`}</ul>`;
+    $("#backBtn").onclick = () => history.back();
     $("#phoneForm").onsubmit = async (ev) => {
       ev.preventDefault();
-      await api(`/api/customers/${id}`, { method: "PATCH", body: { phone: $("#phone").value.trim() } });
-      viewCustomer(id);
+      try {
+        await api(`/api/customers/${id}`, { method: "PATCH", body: { phone: $("#phone").value.trim() } });
+        viewCustomer(id);
+      } catch (e) { if (e.message !== "locked") { $("#phone").setCustomValidity(t("phone")); $("#phone").reportValidity(); } }
     };
     $("#view").querySelectorAll("[data-cancel]").forEach((b) => b.onclick = async () => {
       await api(`/api/entries/${b.dataset.cancel}/cancel`, { method: "POST" });
       viewCustomer(id);
     });
+  }
+
+  // ------------------------------------------------------------ lock screen
+  function showLock() {
+    stopListening(); closeSheet();
+    S.locked = true;
+    document.querySelector(".tabs").hidden = true;
+    let pin = "";
+    $("#view").innerHTML = `<section class="lock">
+      <h1>🔒 ${t("lock_title")}</h1>
+      <div class="dots" id="dots" aria-hidden="true"></div>
+      <div class="lock-msg" id="lockMsg" role="alert"></div>
+      <div class="keypad">
+        ${[1,2,3,4,5,6,7,8,9].map((n) => `<button data-k="${n}">${n}</button>`).join("")}
+        <button data-k="del" aria-label="delete">⌫</button><button data-k="0">0</button>
+        <button data-k="go" class="k-go">${t("unlock")}</button>
+      </div></section>`;
+    const draw = () => { $("#dots").innerHTML = Array.from({ length: Math.max(4, pin.length) }, (_, i) => `<i class="${i < pin.length ? "on" : ""}"></i>`).join(""); };
+    const submit = async () => {
+      if (pin.length < 4) return;
+      try {
+        await api("/api/auth/login", { method: "POST", body: { pin } });
+        S.locked = false; document.querySelector(".tabs").hidden = false; location.hash = "#/"; router(); flushQueue();
+      } catch (e) {
+        const [msg, wait] = String(e.message).split("|");
+        $("#lockMsg").textContent = e.status === 429 || (wait && +wait > 0) ? t("lock_wait", { s: wait || 60 }) : t("lock_wrong");
+        pin = ""; draw();
+      }
+    };
+    $("#view").querySelectorAll("[data-k]").forEach((b) => b.onclick = () => {
+      const k = b.dataset.k;
+      if (k === "del") pin = pin.slice(0, -1);
+      else if (k === "go") return submit();
+      else if (pin.length < 8) pin += k;
+      draw();
+    });
+    S.lockKeys = (ev) => {
+      if (!S.locked) return;
+      if (/^\d$/.test(ev.key) && pin.length < 8) { pin += ev.key; draw(); }
+      else if (ev.key === "Backspace") { pin = pin.slice(0, -1); draw(); }
+      else if (ev.key === "Enter") submit();
+    };
+    draw();
+  }
+  addEventListener("keydown", (ev) => S.lockKeys && S.lockKeys(ev));
+
+  // ------------------------------------------------------------ settings
+  async function viewSettings() {
+    const s = await api("/api/settings");
+    $("#view").innerHTML = `<h2 class="h-tight">${t("nav_settings")}</h2>
+      <section class="set-block">
+        <h3>${t("set_shop")}</h3><p>${t("set_shop_help")}</p>
+        <form class="set-row" id="shopForm"><input id="shopIn" maxlength="60" value="${esc(s.shop_name)}" aria-label="${t("set_shop")}"><button class="btn ghost">${t("save_phone")}</button></form>
+        <div class="set-msg" id="shopMsg" role="status"></div>
+      </section>
+      <section class="set-block">
+        <h3>🔒 ${t("set_pin")}</h3><p>${s.pin_enabled ? t("set_pin_on") : t("set_pin_off")}</p>
+        <form class="set-row" id="pinForm">
+          ${s.pin_enabled ? `<input id="curPin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="8" placeholder="${t("cur_pin")}" aria-label="${t("cur_pin")}">` : ""}
+          <input id="newPin" type="password" inputmode="numeric" autocomplete="new-password" maxlength="8" placeholder="${t("new_pin")}" aria-label="${t("new_pin")}">
+          <button class="btn primary">${s.pin_enabled ? t("pin_change") : t("pin_set")}</button>
+        </form>
+        ${s.pin_enabled ? `<div class="set-row list-gap"><button class="btn ghost" id="pinRemove">${t("pin_remove")}</button><button class="btn ghost" id="lockNow">${t("lock_now")}</button></div>` : ""}
+        <div class="set-msg" id="pinMsg" role="status"></div>
+      </section>
+      <section class="set-block">
+        <h3>${t("set_export")}</h3><p>${t("set_export_help")}</p>
+        <a class="btn ghost" href="/api/export.csv" download>⬇ ${t("export_btn")}</a>
+      </section>
+      <section class="set-block">
+        <h3>${t("set_privacy")}</h3><p>${t("set_privacy_help")}</p>
+      </section>
+      <div class="version">Bolo Khata v${esc(s.version)}</div>`;
+    const msg = (id, text, err) => { const el = $(id); el.textContent = text; el.classList.toggle("err", !!err); };
+    $("#shopForm").onsubmit = async (ev) => {
+      ev.preventDefault();
+      const r = await api("/api/settings", { method: "PATCH", body: { shop_name: $("#shopIn").value } });
+      $("#shopName").textContent = r.shop_name; msg("#shopMsg", t("saved_ok"));
+    };
+    const pinCall = async (body) => {
+      try { await api("/api/auth/pin", { method: "POST", body }); viewSettings(); }
+      catch (e) { if (e.message !== "locked") msg("#pinMsg", e.status === 422 ? t("pin_bad") : (e.status === 429 ? t("lock_wait", { s: String(e.message).split("|")[1] || 60 }) : t("lock_wrong")), true); }
+    };
+    $("#pinForm").onsubmit = (ev) => {
+      ev.preventDefault();
+      const np = $("#newPin").value.trim();
+      if (!/^\d{4,8}$/.test(np)) return msg("#pinMsg", t("pin_bad"), true);
+      pinCall({ current: $("#curPin")?.value.trim() || null, new: np });
+    };
+    if (s.pin_enabled) {
+      $("#pinRemove").onclick = () => {
+        const cur = $("#curPin").value.trim();
+        if (!/^\d{4,8}$/.test(cur)) return msg("#pinMsg", t("pin_bad"), true);
+        pinCall({ current: cur, new: null });
+      };
+      $("#lockNow").onclick = async () => { await api("/api/auth/logout", { method: "POST", body: {} }); showLock(); };
+    }
   }
 
   function refreshAll() {
@@ -477,9 +610,12 @@
     stopListening();
     const h = location.hash || "#/";
     document.querySelectorAll(".tabs a").forEach((a) => a.classList.toggle("on",
-      (a.dataset.tab === "home" && (h === "#/" || h === "")) || (a.dataset.tab === "customers" && h !== "#/")));
-    if (h.startsWith("#/c/")) return viewCustomer(h.split("/")[2]);
-    if (h === "#/customers") return viewCustomers();
+      (a.dataset.tab === "home" && (h === "#/" || h === "")) || (a.dataset.tab === "settings" && h === "#/settings") ||
+      (a.dataset.tab === "customers" && (h === "#/customers" || h.startsWith("#/c/")))));
+    if (S.locked) return showLock();
+    if (h.startsWith("#/c/")) return viewCustomer(h.split("/")[2]).catch(() => {});
+    if (h === "#/customers") return viewCustomers().catch(() => {});
+    if (h === "#/settings") return viewSettings().catch(() => {});
     return viewHome();
   }
   function applyLang() {
@@ -494,17 +630,19 @@
 
   // Space bar = press the mic (handy on a counter laptop)
   addEventListener("keydown", (ev) => {
-    if (ev.code === "Space" && document.activeElement?.tagName !== "INPUT" && $("#mic") && $("#sheet").hidden) { ev.preventDefault(); onMic(); }
+    if (ev.code === "Space" && !S.locked && document.activeElement?.tagName !== "INPUT" && document.activeElement?.tagName !== "BUTTON" && $("#mic") && $("#sheet").hidden) { ev.preventDefault(); onMic(); }
   });
 
   addEventListener("hashchange", router);
   (async () => {
     try { S.config = await api("/api/config"); $("#shopName").textContent = S.config.shop_name; } catch (_) {}
     if (!localStorage.getItem("bk_lang") && S.config.default_lang) S.lang = S.config.default_lang;
-    applyLang(); router(); flushQueue();
+    applyLang();
+    try { const st = await api("/api/auth/status"); if (!st.unlocked) { showLock(); } else { router(); flushQueue(); } }
+    catch (_) { router(); }
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
   })();
 
-  // exposed for the demo / tests
-  window.BoloKhata = { handleText, speak };
+  // exposed for automated UI tests only
+  window.BoloKhata = Object.freeze({ handleText });
 })();

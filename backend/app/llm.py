@@ -23,6 +23,34 @@ Intents: balance = asking how much one customer owes; today = who took credit to
 top = who owes the most; total = total pending; undo = cancel the last entry."""
 
 
+INTENTS = {"entry", "balance", "today", "top", "total", "undo", "yes", "no", "unknown"}
+
+
+def _validated(p):
+    """Never trust model output: coerce and bound every field, else reject."""
+    if p.intent not in INTENTS:
+        return None
+    if p.amount is not None:
+        try:
+            p.amount = float(str(p.amount).replace(",", ""))
+        except ValueError:
+            return None
+        if not (0 < p.amount <= 10_000_000):
+            p.amount = None
+        elif p.amount == int(p.amount):
+            p.amount = int(p.amount)
+    if p.type not in (None, "credit", "payment"):
+        p.type = None
+    if p.name is not None:
+        p.name = "".join(ch for ch in str(p.name) if ch.isprintable())[:60].strip() or None
+    if p.note is not None:
+        p.note = "".join(ch for ch in str(p.note) if ch.isprintable())[:120].strip() or None
+    p.confidence = max(0.0, min(1.0, float(p.confidence or 0)))
+    if p.intent == "entry" and p.type is None:
+        p.type, p.type_defaulted = "credit", True
+    return p
+
+
 def enabled() -> bool:
     return bool(os.getenv("LLM_API_KEY"))
 
@@ -31,6 +59,8 @@ def parse_llm(text: str, context=None):
     if not enabled():
         return None
     base = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    if not base.startswith(("https://", "http://")):
+        return None  # only http(s); never file:// or custom schemes
     model = os.getenv("LLM_MODEL", "gpt-4o-mini")
     user = text if not context else f"Context from previous turn: {json.dumps(context, ensure_ascii=False)}\nSentence: {text}"
     body = {
@@ -43,7 +73,7 @@ def parse_llm(text: str, context=None):
         base + "/chat/completions", data=json.dumps(body).encode(),
         headers={"Authorization": f"Bearer {os.getenv('LLM_API_KEY')}", "Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=float(os.getenv("LLM_TIMEOUT", "6"))) as r:
+        with urllib.request.urlopen(req, timeout=float(os.getenv("LLM_TIMEOUT", "6"))) as r:  # nosec B310
             data = json.loads(r.read())
         obj = json.loads(data["choices"][0]["message"]["content"])
         p = Parsed(
@@ -57,8 +87,6 @@ def parse_llm(text: str, context=None):
             transcript=text,
             source="llm",
         )
-        if isinstance(p.amount, str):
-            p.amount = float(p.amount.replace(",", "")) if p.amount.strip() else None
-        return p
+        return _validated(p)
     except Exception:
         return None

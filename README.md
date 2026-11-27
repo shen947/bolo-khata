@@ -1,5 +1,7 @@
 # Bolo Khata · बोलो खाता
 
+[![CI](https://github.com/shen947/bolo-khata/actions/workflows/ci.yml/badge.svg)](https://github.com/shen947/bolo-khata/actions/workflows/ci.yml)
+
 **A voice-first udhaar (credit) ledger for India's kirana shops.**
 The shop owner taps one button and says *"Ramesh ne 250 ka saman liya"*. The app hears the name, the amount and whether it was credit or a payment, reads it back (*"Ramesh, 250 rupaye udhaar. Sahi hai?"*) and saves it. No forms, no typing, no reading.
 
@@ -37,9 +39,11 @@ Khata apps exist, but they're built around forms: pick a customer, type an amoun
 - **Devanagari ⇄ Latin matching.** "मोहन" finds the customer saved as "Mohan Lal".
 - **Unclear credit or payment?** It defaults to udhaar and *says so*. One tap switches it.
 - **Mistakes:** 30-second undo toast, voice undo, and per-entry cancel. Nothing is ever hard-deleted; every change is in `/api/audit`.
-- **Weak internet:** the app shell is cached (PWA). Entries spoken offline are queued on the phone and processed when the network returns.
+- **Weak internet:** the app shell is cached (PWA). Entries spoken or typed offline are queued on the phone and processed when the network returns. Ledger data itself is never cached on the device.
 - **WhatsApp reminder** in one tap, with the exact balance, in the shop's language.
 - **Three languages:** Hindi, Marathi, English (UI, speech recognition and spoken replies).
+- **PIN lock** (optional, Settings): once set, nobody else on the shop Wi-Fi can open the ledger. 5 wrong tries lock it.
+- **Your data is yours:** download the whole ledger as CSV (opens in Excel) from Settings.
 
 ## Run it
 
@@ -62,7 +66,19 @@ uvicorn app.main:app --reload
 ```bash
 cd backend && pip install -r requirements-dev.txt && pytest
 ```
-43 tests cover Hindi, Hinglish, Marathi and English sentences, number words, quantity-vs-amount, follow-up questions, ambiguous names, voice undo and the full API flow.
+65 tests cover Hindi, Hinglish, Marathi and English sentences, number words, quantity-vs-amount, follow-up questions, ambiguous names, voice undo, the full API flow, and security: PIN lock and brute-force lockout, hashed PIN and sessions, CSRF and origin checks, input limits, CSV formula injection, rate limits, headers, and LLM output validation.
+
+CI runs the tests, **bandit** (static security analysis), **pip-audit** (known CVEs in dependencies) and a `docker compose up` smoke test on every push.
+
+## Security and privacy
+
+Full threat model in **[SECURITY.md](SECURITY.md)**. In short:
+
+- **Optional PIN lock.** PBKDF2-SHA256 hashed PIN, 256-bit session tokens stored only as hashes, `HttpOnly; SameSite=Strict` cookies, brute-force lockout.
+- **Strict Content-Security-Policy.** No inline scripts or styles, no third-party origins (the font is self-hosted), `frame-ancestors 'none'`, plus `nosniff`, `no-referrer` and a Permissions-Policy that allows only the microphone.
+- **CSRF and abuse protection.** Writes must be JSON and same-origin, per-IP rate limits, a 16 KB body cap, and length or format limits on every field. Control and bidi characters are stripped.
+- **Hardened container.** Non-root user, read-only filesystem, all capabilities dropped, `no-new-privileges`, memory and PID limits. API docs are off by default.
+- **Privacy.** Audio is never recorded or stored. Data stays in one SQLite file on the shop's own machine. Entries are never hard-deleted, and every change is audited. The optional LLM only ever sees the sentence text, and its output is validated like any other untrusted input.
 
 ## Configuration (all optional)
 
@@ -76,6 +92,12 @@ See [`.env.example`](.env.example).
 | `LLM_API_KEY` | *(empty)* | Optional. Adds an LLM parser for unusual sentences; falls back to rules on any error |
 | `LLM_BASE_URL` | OpenAI | Any OpenAI-compatible endpoint (Groq, OpenRouter, Sarvam, local Ollama…) |
 | `LLM_MODEL` | `gpt-4o-mini` | Model name |
+| `STORE_TRANSCRIPTS` | `true` | Keep the recognised sentence with each entry (audio is never stored) |
+| `COOKIE_SECURE` | `false` | Set `true` behind HTTPS (Secure cookies + HSTS) |
+| `TRUST_PROXY` | `false` | Trust `X-Forwarded-*` from your own reverse proxy |
+| `RATE_LIMIT_PER_MIN` | `240` | API requests per minute per IP |
+| `ENABLE_API_DOCS` | `false` | Interactive docs at `/docs` |
+| `SESSION_DAYS` | `30` | How long a device stays unlocked after entering the PIN |
 
 ## How it works
 
@@ -94,7 +116,8 @@ See [`.env.example`](.env.example).
 - **`backend/app/lang.py`**: Devanagari → Latin transliteration with schwa deletion, plus the phonetic normaliser used for matching.
 - **`backend/app/db.py`**: the ledger, balances, fuzzy customer matching (exact / ambiguous / new) and the audit trail.
 - **`backend/app/replies.py`**: one-line spoken replies in Hindi, Marathi and English.
-- **`frontend/`**: plain HTML/CSS/JS with no build step. Includes the service worker for offline use.
+- **`backend/app/security.py`**: PIN and sessions, lockout, rate limit, CSRF/origin checks and security headers.
+- **`frontend/`**: plain HTML/CSS/JS with no build step and no third-party requests. Includes the service worker (app shell only) and the self-hosted Mukta font (OFL).
 
 ### API
 | Method | Path | |
@@ -106,6 +129,9 @@ See [`.env.example`](.env.example).
 | GET | `/api/customers` · `/api/customers/{id}` | Balances, history, WhatsApp reminder link |
 | PATCH | `/api/customers/{id}` | Save a phone number |
 | GET | `/api/audit` | Every change, ever |
+| GET/PATCH | `/api/settings` | Shop name, PIN status |
+| POST | `/api/auth/login` · `/logout` · `/pin` | Unlock, lock, set/change/remove PIN |
+| GET | `/api/export.csv` | Whole ledger as CSV |
 
 ## Dependencies and their risks
 

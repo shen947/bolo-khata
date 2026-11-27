@@ -1,58 +1,150 @@
+import csv
+import io
+import logging
 import os
+import re
 import urllib.parse
-from typing import Optional
+from contextlib import asynccontextmanager
+from typing import Literal, Optional
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
-from . import db, llm
+from . import db, llm, security
 from .parser import parse
 from .replies import say, inr
 
-SHOP_NAME = os.getenv("SHOP_NAME", "Singh General Store")
+VERSION = "1.1.0"
+ENV_SHOP_NAME = os.getenv("SHOP_NAME", "Singh General Store")
 FRONTEND = os.getenv("FRONTEND_DIR", os.path.join(os.path.dirname(__file__), "..", "..", "frontend"))
+DOCS = os.getenv("ENABLE_API_DOCS", "false").lower() == "true"
+log = logging.getLogger("bolo_khata")
 
-app = FastAPI(title="Bolo Khata", version="1.0.0")
+Lang = Literal["hi", "mr", "en"]
+# ASCII control chars + zero-width + bidi override/isolate chars (Trojan-Source style tricks).
+# Written as escapes so the source file itself never contains them.
+CONTROL = re.compile("[\\x00-\\x1f\\x7f\\u200b-\\u200f\\u202a-\\u202e\\u2066-\\u2069]")
+
+
+def clean(s: Optional[str], max_len: int) -> Optional[str]:
+    """Strip control / bidi-override characters, trim, and bound length."""
+    if s is None:
+        return None
+    s = CONTROL.sub("", str(s)).strip()
+    return s[:max_len] or None
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    db.get()
+    yield
+
+
+app = FastAPI(title="Bolo Khata", version=VERSION, lifespan=lifespan,
+              docs_url="/docs" if DOCS else None, redoc_url=None,
+              openapi_url="/openapi.json" if DOCS else None)
+app.add_middleware(security.SecurityMiddleware)
+
+
+@app.exception_handler(Exception)
+async def _unhandled(request: Request, exc: Exception):
+    log.exception("unhandled error on %s", request.url.path)
+    return JSONResponse({"detail": "Something went wrong. Please try again."}, 500)
+
+
+@app.exception_handler(RequestValidationError)
+async def _invalid(request: Request, exc: RequestValidationError):
+    # don't echo the submitted values back
+    fields = sorted({".".join(str(p) for p in e.get("loc", [])[1:]) for e in exc.errors()})
+    return JSONResponse({"detail": "Invalid input", "fields": fields}, 422)
+
+
+# ---------------------------------------------------------------- models
+class Context(BaseModel):
+    awaiting: Optional[Literal["amount", "name", "confirm"]] = None
+    name: Optional[str] = Field(None, max_length=60)
+    amount: Optional[float] = Field(None, gt=0, le=10_000_000)
+    type: Optional[Literal["credit", "payment"]] = None
+    type_defaulted: Optional[bool] = False
+    note: Optional[str] = Field(None, max_length=120)
+    transcript: Optional[str] = Field(None, max_length=300)
+    model_config = {"extra": "ignore"}
 
 
 class InterpretIn(BaseModel):
-    text: str
-    lang: str = "hi"
-    context: Optional[dict] = None
+    text: str = Field(..., min_length=1, max_length=300)
+    lang: Lang = "hi"
+    context: Optional[Context] = None
 
 
 class EntryIn(BaseModel):
-    customer_id: Optional[int] = None
-    name: Optional[str] = None
-    amount: float
-    type: str
-    note: Optional[str] = None
-    transcript: Optional[str] = None
-    lang: Optional[str] = "hi"
-    source: Optional[str] = "voice"
+    customer_id: Optional[int] = Field(None, gt=0)
+    name: Optional[str] = Field(None, max_length=60)
+    amount: float = Field(..., gt=0, le=10_000_000)
+    type: Literal["credit", "payment"]
+    note: Optional[str] = Field(None, max_length=120)
+    transcript: Optional[str] = Field(None, max_length=300)
+    lang: Lang = "hi"
+    source: Literal["voice", "typed", "offline", "manual"] = "voice"
+
+
+PHONE_RE = re.compile(r"^\+?[0-9][0-9 \-]{6,18}$")
 
 
 class CustomerIn(BaseModel):
-    name: Optional[str] = None
-    phone: Optional[str] = None
+    name: Optional[str] = Field(None, max_length=60)
+    phone: Optional[str] = Field(None, max_length=20)
+
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, v):
+        if v in (None, ""):
+            return v
+        if not PHONE_RE.match(v.strip()):
+            raise ValueError("phone must be 7-15 digits")
+        return v.strip()
 
 
-@app.on_event("startup")
-def _startup():
-    db.get()
+class ConfirmEntry(Context):
+    is_new: bool = False
 
 
+class ConfirmTextIn(BaseModel):
+    entry: ConfirmEntry
+    lang: Lang = "hi"
+    model_config = {"extra": "ignore"}
+
+
+class PinIn(BaseModel):
+    pin: str = Field(..., pattern=r"^\d{4,8}$")
+
+
+class PinChangeIn(BaseModel):
+    current: Optional[str] = Field(None, pattern=r"^\d{4,8}$")
+    new: Optional[str] = Field(None, pattern=r"^\d{4,8}$")  # None = remove PIN
+
+
+class SettingsIn(BaseModel):
+    shop_name: Optional[str] = Field(None, max_length=60)
+
+
+def shop_name():
+    return db.get_setting("shop_name") or ENV_SHOP_NAME
+
+
+# ---------------------------------------------------------------- basics
 @app.get("/api/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "version": VERSION}
 
 
 @app.get("/api/config")
 def config():
-    return {"shop_name": SHOP_NAME, "llm": llm.enabled(),
-            "default_lang": os.getenv("DEFAULT_LANG", "hi")}
+    return {"shop_name": shop_name(), "llm": llm.enabled(),
+            "default_lang": os.getenv("DEFAULT_LANG", "hi"), "version": VERSION}
 
 
 @app.get("/api/summary")
@@ -60,6 +152,102 @@ def summary():
     return db.summary()
 
 
+# ---------------------------------------------------------------- auth
+@app.get("/api/auth/status")
+def auth_status(request: Request):
+    enabled = security.pin_enabled()
+    ok = (not enabled) or security.session_valid(request.cookies.get(security.COOKIE))
+    return {"pin_enabled": enabled, "unlocked": ok,
+            "retry_after": security.LOCKOUT.blocked_for(security.client_ip(request))}
+
+
+@app.post("/api/auth/login")
+def login(body: PinIn, request: Request):
+    ip = security.client_ip(request)
+    wait = security.LOCKOUT.blocked_for(ip)
+    if wait:
+        return JSONResponse({"detail": "Too many wrong PINs", "retry_after": wait}, 429)
+    stored = db.get_setting("pin_hash")
+    if not stored:
+        return {"ok": True}
+    if not security.verify_pin(body.pin, stored):
+        security.LOCKOUT.fail(ip)
+        db.add_audit("login_failed", ip)
+        return JSONResponse({"detail": "Wrong PIN", "retry_after": security.LOCKOUT.blocked_for(ip)}, 401)
+    security.LOCKOUT.ok(ip)
+    resp = JSONResponse({"ok": True})
+    security.set_cookie(resp, security.new_session(), request)
+    return resp
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request):
+    security.end_session(request.cookies.get(security.COOKIE))
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(security.COOKIE, path="/")
+    return resp
+
+
+@app.post("/api/auth/pin")
+def set_pin(body: PinChangeIn, request: Request):
+    """Set, change or remove the PIN. Changing/removing needs the current PIN."""
+    ip = security.client_ip(request)
+    stored = db.get_setting("pin_hash")
+    if stored:
+        wait = security.LOCKOUT.blocked_for(ip)
+        if wait:
+            return JSONResponse({"detail": "Too many wrong PINs", "retry_after": wait}, 429)
+        if not body.current or not security.verify_pin(body.current, stored):
+            security.LOCKOUT.fail(ip)
+            return JSONResponse({"detail": "Current PIN is wrong"}, 401)
+        security.LOCKOUT.ok(ip)
+    db.clear_sessions()  # log out every other device
+    if body.new:
+        db.set_setting("pin_hash", security.hash_pin(body.new))
+        resp = JSONResponse({"ok": True, "pin_enabled": True})
+        security.set_cookie(resp, security.new_session(), request)
+        return resp
+    db.set_setting("pin_hash", None)
+    return {"ok": True, "pin_enabled": False}
+
+
+# ---------------------------------------------------------------- settings / export
+@app.get("/api/settings")
+def get_settings():
+    return {"shop_name": shop_name(), "pin_enabled": security.pin_enabled(),
+            "store_transcripts": db.STORE_TRANSCRIPTS, "llm": llm.enabled(), "version": VERSION}
+
+
+@app.patch("/api/settings")
+def patch_settings(body: SettingsIn):
+    name = clean(body.shop_name, 60)
+    if name:
+        db.set_setting("shop_name", name)
+    return get_settings()
+
+
+def _csv_safe(v):
+    """Block spreadsheet formula injection (=, +, -, @, tab, CR) in exported cells."""
+    if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + v
+    return v
+
+
+@app.get("/api/export.csv")
+def export_csv():
+    rows = db.export_rows()
+    buf = io.StringIO()
+    cols = ["id", "created_at", "customer", "phone", "type", "amount", "note", "status", "cancelled_at", "lang", "source"]
+    w = csv.DictWriter(buf, fieldnames=cols)
+    w.writeheader()
+    for r in rows:
+        w.writerow({k: _csv_safe(r.get(k)) for k in cols})
+    db.add_audit("export_csv", f"{len(rows)} rows")
+    return Response("﻿" + buf.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="bolo-khata-export.csv"'})
+
+
+# ---------------------------------------------------------------- voice
 def _parse(text, context):
     p = llm.parse_llm(text, context) if llm.enabled() else None
     if p is None or p.intent == "unknown":
@@ -70,8 +258,12 @@ def _parse(text, context):
 @app.post("/api/interpret")
 def interpret(body: InterpretIn):
     lang = body.lang
-    ctx = body.context or {}
-    p = _parse(body.text, ctx)
+    ctx = body.context.model_dump() if body.context else {}
+    p = _parse(clean(body.text, 300) or "", ctx)
+    p.name = clean(p.name, 60)
+    p.note = clean(p.note, 120)
+    if p.amount is not None and not (0 < float(p.amount) <= 10_000_000):
+        p.amount = None
     base = {"parsed": p.dict()}
 
     if p.intent == "yes":
@@ -104,7 +296,7 @@ def interpret(body: InterpretIn):
         s = db.summary()
         return base | {"kind": "answer", "say": say("total", lang, amt=s["outstanding"], n=s["customers_due"])}
 
-    if p.intent == "balance":
+    if p.intent == "balance" and p.name:
         status, matches = db.match_customers(p.name)
         if status == "new":
             return base | {"kind": "answer", "say": say("not_found", lang, name=p.name)}
@@ -116,8 +308,8 @@ def interpret(body: InterpretIn):
         return base | {"kind": "answer", "customer": c, "say": say(key, lang, name=c["name"], bal=c["balance"])}
 
     if p.intent == "entry":
-        pending = {"name": p.name, "amount": p.amount, "type": p.type,
-                   "type_defaulted": p.type_defaulted, "note": p.note, "transcript": p.transcript}
+        pending = {"name": p.name, "amount": p.amount, "type": p.type or "credit",
+                   "type_defaulted": p.type_defaulted, "note": p.note, "transcript": clean(p.transcript, 300)}
         if p.amount is None:
             return base | {"kind": "clarify", "awaiting": "amount", "pending": pending,
                            "say": say("ask_amount", lang, name=p.name or "")}
@@ -139,37 +331,38 @@ def interpret(body: InterpretIn):
 
 
 def confirm_text(e, lang):
-    key = "confirm_credit" if e["type"] == "credit" else "confirm_payment"
+    key = "confirm_credit" if e.get("type") == "credit" else "confirm_payment"
     parts = []
     if e.get("is_new"):
-        parts.append(say("new_customer", lang, name=e["name"]))
-    parts.append(say(key, lang, name=e["name"], amt=e["amount"]))
+        parts.append(say("new_customer", lang, name=e.get("name") or ""))
+    parts.append(say(key, lang, name=e.get("name") or "", amt=e.get("amount") or 0))
     if e.get("type_defaulted"):
         parts.append(say("defaulted", lang))
     return " ".join(parts)
 
 
 @app.post("/api/confirm-text")
-def confirm_text_api(body: dict):
-    return {"say": confirm_text(body["entry"], body.get("lang", "hi"))}
+def confirm_text_api(body: ConfirmTextIn):
+    e = body.entry.model_dump()
+    e["name"] = clean(e.get("name"), 60)
+    return {"say": confirm_text(e, body.lang)}
 
 
+# ---------------------------------------------------------------- entries / customers
 @app.post("/api/entries")
 def create_entry(body: EntryIn):
-    if body.type not in ("credit", "payment"):
-        raise HTTPException(400, "type must be credit or payment")
-    if body.amount <= 0 or body.amount > 10_000_000:
-        raise HTTPException(400, "amount out of range")
     cid = body.customer_id
     if cid is None:
-        if not body.name:
+        name = clean(body.name, 60)
+        if not name:
             raise HTTPException(400, "name or customer_id required")
-        cid = db.create_customer(body.name)["id"]
+        cid = db.create_customer(name)["id"]
     elif not db.get_customer(cid):
         raise HTTPException(404, "customer not found")
-    e = db.add_entry(cid, body.amount, body.type, body.note, body.transcript, body.lang, body.source)
+    e = db.add_entry(cid, body.amount, body.type, clean(body.note, 120), clean(body.transcript, 300),
+                     body.lang, body.source)
     c = db.get_customer(cid)
-    lang = body.lang or "hi"
+    lang = body.lang
     if c["balance"] > 0:
         msg = say("saved", lang, name=c["name"], bal=c["balance"])
     elif c["balance"] == 0:
@@ -189,14 +382,15 @@ def cancel(eid: int):
 
 @app.get("/api/customers")
 def customers(q: Optional[str] = None):
-    return db.list_customers(q)
+    return db.list_customers(clean(q, 60))
 
 
 @app.post("/api/customers")
 def new_customer(body: CustomerIn):
-    if not body.name:
+    name = clean(body.name, 60)
+    if not name:
         raise HTTPException(400, "name required")
-    return db.create_customer(body.name, body.phone)
+    return db.create_customer(name, body.phone or None)
 
 
 def _wa_phone(phone):
@@ -209,12 +403,12 @@ def _wa_phone(phone):
 
 
 @app.get("/api/customers/{cid}")
-def customer(cid: int, lang: str = "hi"):
+def customer(cid: int, lang: Lang = "hi"):
     c = db.get_customer(cid)
     if not c:
         raise HTTPException(404, "customer not found")
-    msg = say("reminder", lang, name=c["name"], shop=SHOP_NAME, bal=max(c["balance"], 0))
-    wa = f"https://wa.me/{_wa_phone(c['phone'])}?text={urllib.parse.quote(msg)}"
+    msg = say("reminder", lang, name=c["name"], shop=shop_name(), bal=max(c["balance"], 0))
+    wa = f"https://wa.me/{_wa_phone(c['phone'])}?text={urllib.parse.quote(msg, safe='')}"
     return c | {"entries": db.customer_entries(cid), "reminder_text": msg, "whatsapp_url": wa}
 
 
@@ -222,30 +416,31 @@ def customer(cid: int, lang: str = "hi"):
 def patch_customer(cid: int, body: CustomerIn):
     if not db.get_customer(cid):
         raise HTTPException(404, "customer not found")
-    return db.update_customer(cid, body.name, body.phone)
+    return db.update_customer(cid, clean(body.name, 60), body.phone)
 
 
 @app.get("/api/audit")
 def audit(limit: int = 100):
-    return db.audit_log(limit)
+    return db.audit_log(max(1, min(limit, 500)))
 
 
 # ---------------------------------------------------------------- frontend
 if os.path.isdir(FRONTEND):
     app.mount("/static", StaticFiles(directory=FRONTEND), name="static")
 
-    @app.get("/sw.js")
+    @app.get("/sw.js", include_in_schema=False)
     def sw():
-        return FileResponse(os.path.join(FRONTEND, "sw.js"), media_type="application/javascript")
+        return FileResponse(os.path.join(FRONTEND, "sw.js"), media_type="application/javascript",
+                            headers={"Service-Worker-Allowed": "/"})
 
-    @app.get("/manifest.webmanifest")
+    @app.get("/manifest.webmanifest", include_in_schema=False)
     def manifest():
         return FileResponse(os.path.join(FRONTEND, "manifest.webmanifest"), media_type="application/manifest+json")
 
-    @app.get("/")
+    @app.get("/", include_in_schema=False)
     def index():
         return FileResponse(os.path.join(FRONTEND, "index.html"))
-else:
-    @app.get("/")
+else:  # pragma: no cover
+    @app.get("/", include_in_schema=False)
     def index_missing():
-        return JSONResponse({"error": "frontend not found", "frontend_dir": FRONTEND}, 500)
+        return JSONResponse({"error": "frontend not found"}, 500)

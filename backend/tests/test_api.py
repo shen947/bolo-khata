@@ -18,7 +18,7 @@ def client():
 
 
 def test_health_and_summary(client):
-    assert client.get("/api/health").json() == {"ok": True}
+    assert client.get("/api/health").json()["ok"] is True
     s = client.get("/api/summary").json()
     assert s["customers_total"] == 10
 
