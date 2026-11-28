@@ -59,6 +59,9 @@ Open **http://localhost:8000** in **Chrome** (desktop or Android) and allow the 
 
 > Speech recognition uses the browser's Web Speech API (`hi-IN`, `mr-IN`, `en-IN`). Chrome supports it fully on desktop and Android; Safari (macOS and iOS 14.5+) has partial support that I have not tested; Firefox does not support it. On a browser with none, the app records a short clip and sends it to a speech-to-text provider **if you set `STT_API_KEY`** (any OpenAI-compatible `/audio/transcriptions` endpoint, e.g. OpenAI, Groq or a self-hosted Whisper). With no key, the text box under the mic always works and everything else is identical. In Chrome the browser sends your audio to Google for recognition; in Safari, to Apple.
 
+### Deploy a live copy (HTTPS)
+Chrome's microphone needs HTTPS, so a hosted copy is the easiest way to try the voice features. [One-click deploy on Render](https://render.com/deploy?repo=https://github.com/shen947/bolo-khata) reads `render.yaml` (free plan, `COOKIE_SECURE=true`). On the free plan the database lives on the container's disk and resets when the service restarts or redeploys, which is fine for a demo and not for real records.
+
 ### Without Docker
 ```bash
 cd backend
