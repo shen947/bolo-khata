@@ -187,7 +187,7 @@
       try { rec.start(); } catch (e) { reject(e); }
     });
   }
-  // Browsers without built-in speech recognition (Safari, Firefox, iPhone): record a short clip and
+  // Browsers without built-in speech recognition (e.g. Firefox): record a short clip and
   // let the server transcribe it. Only offered when the server has STT_API_KEY set.
   const canRecord = () => !!(S.config.stt && window.MediaRecorder && navigator.mediaDevices?.getUserMedia);
   const canListen = () => !!SR || canRecord();

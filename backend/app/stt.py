@@ -1,5 +1,5 @@
 """Optional server-side speech-to-text, for browsers without built-in speech recognition
-(Safari, Firefox, iPhone). Off unless STT_API_KEY is set; the app never needs it.
+(e.g. Firefox). Off unless STT_API_KEY is set; the app never needs it.
 
 Works with any OpenAI-compatible /audio/transcriptions endpoint (OpenAI, Groq, a self-hosted
 faster-whisper server). The audio is forwarded and never written to disk or logged.

@@ -57,7 +57,7 @@ docker compose up
 
 Open **http://localhost:8000** in **Chrome** (desktop or Android) and allow the microphone. No `.env` and no API keys needed. It starts with 10 demo customers (clear them any time from the home screen or Settings).
 
-> Speech recognition uses the browser's Web Speech API (`hi-IN`, `mr-IN`, `en-IN`), which Chrome and Edge support. In Safari, Firefox or on an iPhone the app records a short clip and sends it to a speech-to-text provider **if you set `STT_API_KEY`** (any OpenAI-compatible `/audio/transcriptions` endpoint, e.g. OpenAI, Groq or a self-hosted Whisper). With no key, the text box under the mic always works and everything else is identical.
+> Speech recognition uses the browser's Web Speech API (`hi-IN`, `mr-IN`, `en-IN`). Chrome supports it fully on desktop and Android; Safari (macOS and iOS 14.5+) has partial support that I have not tested; Firefox does not support it. On a browser with none, the app records a short clip and sends it to a speech-to-text provider **if you set `STT_API_KEY`** (any OpenAI-compatible `/audio/transcriptions` endpoint, e.g. OpenAI, Groq or a self-hosted Whisper). With no key, the text box under the mic always works and everything else is identical. In Chrome the browser sends your audio to Google for recognition; in Safari, to Apple.
 
 ### Without Docker
 ```bash
@@ -150,8 +150,8 @@ See [`.env.example`](.env.example).
 
 | Dependency | Used for | Cost | Risk and mitigation |
 |---|---|---|---|
-| Chrome Web Speech API | Speech-to-text (default) | Free | Needs Chrome/Edge and internet. Fallbacks: the text box always works, and the optional server-side STT (below) covers Safari, Firefox and iPhone |
-| Optional STT provider (`STT_API_KEY`) | Speech-to-text everywhere | About ₹0.5 per minute of audio on hosted Whisper; one entry is ~3 seconds | Off by default; audio is forwarded, never stored; capped at 20 clips/min/IP and 700 KB each. If the provider is down the app returns an empty result and the user types instead |
+| Chrome Web Speech API | Speech-to-text (default) | Free | Chrome works fully; Safari partially (untested by me); Firefox not at all; needs internet; the browser vendor hears the audio. Fallbacks: the text box always works, and the optional server-side STT (below) covers browsers with no support |
+| Optional STT provider (`STT_API_KEY`) | Speech-to-text in any browser | OpenAI whisper-1 is $0.006/min; Groq Whisper turbo is $0.04/hour (billed 10 s minimum per request, so ~$0.11 per 1,000 entries). Check current prices | Off by default; audio is forwarded, never stored; capped at 20 clips/min/IP and 700 KB each. If the provider is down the app returns an empty result and the user types instead |
 | Browser speechSynthesis | Spoken replies | Free | Marathi voices are missing on some phones; falls back to the Hindi voice |
 | Optional LLM | Odd sentences | ~₹0.01 per entry with a small model | Off by default; rules parser is the fallback |
 | WhatsApp `wa.me` links | Reminders | Free | Owner presses send; no WhatsApp Business API needed |
