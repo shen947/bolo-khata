@@ -29,6 +29,7 @@ SESSION_DAYS = int(os.getenv("SESSION_DAYS", "30"))
 PBKDF2_ITER = 200_000
 PUBLIC_API = {"/api/health", "/api/config", "/api/auth/status", "/api/auth/login"}
 MAX_BODY = 16 * 1024
+STT_MAX = int(os.getenv("STT_MAX_BYTES", "700000"))   # one spoken sentence of audio
 
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; "
        "img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; "
@@ -135,6 +136,8 @@ class RateLimiter:
 
 
 API_LIMIT = RateLimiter(int(os.getenv("RATE_LIMIT_PER_MIN", "240")))
+STT_LIMIT = RateLimiter(int(os.getenv("STT_LIMIT_PER_MIN", "20")))   # transcription costs money: keep it tight
+STT_PATH = "/api/transcribe"
 
 
 def client_ip(request) -> str:
@@ -163,12 +166,15 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 return self._headers(JSONResponse({"detail": "Too many requests. Slow down."}, 429, headers={"Retry-After": "60"}), path)
             if request.method in ("POST", "PUT", "PATCH", "DELETE"):
                 ctype = request.headers.get("content-type", "")
-                if not ctype.startswith("application/json"):
+                is_audio = path == STT_PATH and ctype.startswith("audio/")
+                if not (ctype.startswith("application/json") or is_audio):
                     return self._headers(JSONResponse({"detail": "Content-Type must be application/json"}, 415), path)
                 if not _same_origin(request):
                     return self._headers(JSONResponse({"detail": "Cross-origin request blocked"}, 403), path)
+                if is_audio and not STT_LIMIT.allow(ip):
+                    return self._headers(JSONResponse({"detail": "Too many requests. Slow down."}, 429, headers={"Retry-After": "60"}), path)
                 try:
-                    if int(request.headers.get("content-length") or 0) > MAX_BODY:
+                    if int(request.headers.get("content-length") or 0) > (STT_MAX if is_audio else MAX_BODY):
                         return self._headers(JSONResponse({"detail": "Request too large"}, 413), path)
                 except ValueError:
                     return self._headers(JSONResponse({"detail": "Bad Content-Length"}, 400), path)

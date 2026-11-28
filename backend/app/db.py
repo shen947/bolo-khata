@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS customers (
   name TEXT NOT NULL,
   key TEXT NOT NULL,
   phone TEXT,
+  promise_date TEXT,
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS entries (
@@ -78,6 +79,8 @@ def get():
             if CON is None:
                 con = connect()
                 con.executescript(SCHEMA)
+                if "promise_date" not in {r["name"] for r in con.execute("PRAGMA table_info(customers)")}:
+                    con.execute("ALTER TABLE customers ADD COLUMN promise_date TEXT")   # upgrade from v1.0/1.1
                 if os.getenv("SEED_DEMO", "true").lower() in ("1", "true", "yes"):
                     if con.execute("SELECT COUNT(*) FROM customers").fetchone()[0] == 0:
                         seed(con)
@@ -94,14 +97,14 @@ def reset_for_tests(path):
 # ------------------------------------------------------------------ customers
 # Plain SQL literals: nothing is assembled at runtime; user values only go through "?" params.
 LIST_CUSTOMERS_SQL = """
-SELECT c.id, c.name, c.phone,
+SELECT c.id, c.name, c.phone, c.promise_date,
        COALESCE(SUM(CASE WHEN e.status='active' AND e.type='credit' THEN e.amount WHEN e.status='active' AND e.type='payment' THEN -e.amount ELSE 0 END),0) AS balance,
        MAX(CASE WHEN e.status='active' THEN e.created_at END) AS last_at
 FROM customers c LEFT JOIN entries e ON e.customer_id=c.id
 GROUP BY c.id ORDER BY balance DESC, c.name
 """
 GET_CUSTOMER_SQL = """
-SELECT c.id, c.name, c.phone, c.created_at,
+SELECT c.id, c.name, c.phone, c.promise_date, c.created_at,
        COALESCE(SUM(CASE WHEN e.status='active' AND e.type='credit' THEN e.amount WHEN e.status='active' AND e.type='payment' THEN -e.amount ELSE 0 END),0) AS balance
 FROM customers c LEFT JOIN entries e ON e.customer_id=c.id
 WHERE c.id=? GROUP BY c.id
@@ -153,6 +156,17 @@ def update_customer(cid, name=None, phone=None):
             con.execute("UPDATE customers SET phone=? WHERE id=?", (phone, cid))
         con.execute("INSERT INTO audit(customer_id, action, detail, at) VALUES (?,?,?,?)",
                     (cid, "customer_updated", f"name={name} phone={phone}", now()))
+        con.commit()
+    return get_customer(cid)
+
+
+def set_promise(cid, date_iso):
+    """date_iso: 'YYYY-MM-DD' or None to clear."""
+    con = get()
+    with _lock:
+        con.execute("UPDATE customers SET promise_date=? WHERE id=?", (date_iso, cid))
+        con.execute("INSERT INTO audit(customer_id, action, detail, at) VALUES (?,?,?,?)",
+                    (cid, "promise_set" if date_iso else "promise_cleared", date_iso, now()))
         con.commit()
     return get_customer(cid)
 
@@ -242,7 +256,16 @@ def summary():
     custs = list_customers()
     outstanding = sum(c["balance"] for c in custs if c["balance"] > 0)
     overdue_cut = (datetime.now() - timedelta(days=30)).isoformat(sep=" ")
+    promises = []
+    for c in custs:
+        if c["balance"] > 0 and c.get("promise_date"):
+            state = "overdue" if c["promise_date"] < today else "today" if c["promise_date"] == today else "upcoming"
+            promises.append({"customer_id": c["id"], "name": c["name"], "balance": c["balance"],
+                             "promise_date": c["promise_date"], "state": state})
+    promises.sort(key=lambda x: (x["promise_date"], -x["balance"]))
     return {
+        "promises": promises[:8],
+        "promises_due": sum(1 for x in promises if x["state"] != "upcoming"),
         "today_given": t["given"], "today_collected": t["collected"], "today_count": t["n"],
         "outstanding": outstanding,
         "customers_due": sum(1 for c in custs if c["balance"] > 0),
@@ -333,6 +356,21 @@ SEED_CUSTOMERS = [
 SEED_ITEMS = ["atta 5 kg", "doodh", "tel", "chawal", "sabun", "chini", "dal", "masala", "biscuit", None]
 
 
+def has_demo():
+    return get().execute("SELECT 1 FROM entries WHERE source='seed' LIMIT 1").fetchone() is not None
+
+
+def clear_demo():
+    """Remove the sample ledger so a real shop starts empty. Real entries are never touched."""
+    con = get()
+    with _lock:
+        n = con.execute("DELETE FROM entries WHERE source='seed'").rowcount
+        con.execute("DELETE FROM customers WHERE id NOT IN (SELECT DISTINCT customer_id FROM entries)")
+        con.execute("INSERT INTO audit(action, detail, at) VALUES (?,?,?)", ("demo_cleared", f"{n} entries", now()))
+        con.commit()
+    return n
+
+
 def seed(con):
     """Realistic demo ledger: entries between 9am and 9pm over the last ~7 weeks,
     payments never exceed what the customer owed at that time."""
@@ -357,4 +395,9 @@ def seed(con):
                 """INSERT INTO entries(customer_id, amount, type, note, transcript, lang, source, created_at)
                    VALUES (?,?,?,?,?,?,?,?)""",
                 (cid, amt, t, note, None, "hi", "seed", ts.isoformat(sep=" ")))
+        # a few "kal dega" promises so the home screen has something to show on a fresh install
+        offset = {"Ramesh Patil": -1, "Mohan Lal": 0, "Imran Bhai": 1, "Ganesh Shinde": 3}.get(name)
+        if offset is not None and bal > 0:
+            con.execute("UPDATE customers SET promise_date=? WHERE id=?",
+                        ((now_.date() + timedelta(days=offset)).isoformat(), cid))
     con.commit()

@@ -17,6 +17,8 @@ Please **don't open a public issue**. Email **shubhamsingh78882@gmail.com** with
 | A crafted customer name or spoken sentence | Inject script into the page (XSS) | All dynamic text is HTML-escaped; a strict **Content-Security-Policy** (`script-src 'self'`, no inline scripts or styles, no third-party origins) blocks injected script even if escaping were missed |
 | A crafted sentence sent to the optional LLM | Prompt injection to write junk into the ledger | Model output is treated as untrusted: intent must be in an allow-list, amounts are bounded, names and notes are stripped of control/bidi characters and length-capped. Every entry still needs the owner's spoken or tapped confirmation |
 | A crafted name exported to Excel | Formula injection (`=HYPERLINK(...)`) | Cells starting with `= + - @` tab or CR are prefixed with `'` in CSV export |
+| Someone abusing the audio endpoint | Run up the speech-to-text bill or upload junk | Endpoint exists only when `STT_API_KEY` is set (else 501). Only `audio/*` types, a 700 KB cap enforced on the bytes actually received, a separate 20 requests/min/IP limit, same-origin and PIN checks like every other write |
+| A bad promise date | Store garbage or a far-future date | Must parse as a real date between today and one year ahead, else 422 |
 | A flood of requests | Exhaust the server | Per-IP rate limit (240/min by default), 16 KB request body cap, text inputs length-capped |
 | A container breakout attempt | Escalate from the app process | Runs as non-root UID 10001, read-only root filesystem, all Linux capabilities dropped, `no-new-privileges`, memory and PID limits |
 | A shared or stolen phone | Read balances from browser storage | The service worker caches only the app shell, never `/api/*` data. Locking clears the session cookie |
@@ -30,7 +32,7 @@ Please **don't open a public issue**. Email **shubhamsingh78882@gmail.com** with
 
 ## Privacy
 
-- **Audio is never recorded, uploaded by the app, or stored.** Speech recognition runs in the browser (Chrome's Web Speech API). The browser vendor processes the audio to return text, as with any Chrome voice input.
+- **Audio is never stored.** By default speech recognition runs in the browser (Chrome's Web Speech API); the browser vendor processes the audio to return text, as with any Chrome voice input. If the owner turns on the optional speech-to-text fallback (`STT_API_KEY`), a short clip from browsers without built-in recognition is sent through this server to the provider they chose, held in memory only, and discarded. Settings says so when it is on.
 - Only the recognised sentence is kept with an entry (for resolving disputes). Set `STORE_TRANSCRIPTS=false` to keep none.
 - All data lives in one SQLite file in the `khata-data` Docker volume on the owner's own machine. Nothing is sent anywhere else unless the owner sets `LLM_API_KEY`, in which case only the sentence text goes to that provider.
 - The owner can download everything as CSV at any time (Settings → Download your ledger).
@@ -46,4 +48,4 @@ Please **don't open a public issue**. Email **shubhamsingh78882@gmail.com** with
 
 - A single PIN per shop. There are no separate staff accounts yet.
 - The rate limiter and lockout live in memory, so they reset when the app restarts. That's fine for a single-shop deployment; a multi-tenant version would move them to Redis.
-- Speech-to-text depends on the browser vendor's service. An on-device engine is on the roadmap.
+- Speech-to-text depends on the browser vendor's service, or on the provider you configure for the fallback. An on-device engine is on the roadmap.

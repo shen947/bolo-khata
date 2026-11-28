@@ -75,8 +75,32 @@
     set_privacy: { hi: "निजता", mr: "गोपनीयता", en: "Privacy" },
     set_privacy_help: { hi: "आवाज़ रिकॉर्ड या सेव नहीं होती, सिर्फ़ लिखा हुआ वाक्य। सारा डेटा आपके अपने सर्वर पर रहता है।", mr: "आवाज रेकॉर्ड होत नाही, फक्त लिहिलेले वाक्य. सर्व डेटा तुमच्या सर्व्हरवर राहतो.", en: "Audio is never recorded or stored, only the recognised sentence. All data stays on your own server." },
 
+    promises_title: { hi: "देने के वादे", mr: "देण्याची वचने", en: "Promised payments" },
+    p_overdue: { hi: "तारीख निकल गई", mr: "तारीख उलटली", en: "Overdue" },
+    p_today: { hi: "आज", mr: "आज", en: "Today" },
+    promise_line: { hi: "वादा: {when}", mr: "वचन: {when}", en: "Promised: {when}" },
+    set_when: { hi: "कब देंगे?", mr: "कधी देणार?", en: "When will they pay?" },
+    clear_promise: { hi: "हटाएँ", mr: "काढा", en: "Remove" },
+    welcome_title: { hi: "स्वागत है! तीन कदम:", mr: "स्वागत! तीन पावले:", en: "Welcome! Three steps:" },
+    welcome_1: { hi: "माइक दबाइए (पहली बार ब्राउज़र पूछे तो \"अनुमति दें\")", mr: "माइक दाबा (ब्राउझरने विचारल्यास \"परवानगी द्या\")", en: "Tap the mic (allow the microphone when the browser asks)" },
+    welcome_2: { hi: "बोलिए: “रमेश ने 250 का सामान लिया, कल देगा”", mr: "बोला: “रमेशने 250 रुपयांचे सामान घेतले, उद्या देईल”", en: "Say: “Ramesh took 250 on credit, will pay tomorrow”" },
+    welcome_3: { hi: "\"हाँ\" बोलिए, या 5 सेकंड रुकिए। सेव हो जाएगा। गलती हो तो \"वापस लें\"।", mr: "\"हो\" बोला, किंवा 5 सेकंद थांबा. सेव्ह होईल. चूक झाल्यास \"परत घ्या\".", en: "Say “yes”, or wait 5 seconds, and it saves. Made a mistake? Tap Undo." },
+    got_it: { hi: "समझ गया", mr: "समजले", en: "Got it" },
+    demo_banner: { hi: "ये नमूना खाते हैं, आपकी दुकान के नहीं।", mr: "ही नमुना खाती आहेत, तुमच्या दुकानाची नाहीत.", en: "These are sample accounts, not your shop's." },
+    demo_clear: { hi: "नमूना हटाकर अपनी दुकान शुरू करें", mr: "नमुना काढून तुमचे दुकान सुरू करा", en: "Clear samples and start my shop" },
+    demo_sure: { hi: "पक्का? नमूना खाते हट जाएँगे। आपकी अपनी एंट्री नहीं हटेंगी।", mr: "नक्की? नमुना खाती जातील. तुमच्या स्वतःच्या नोंदी राहतील.", en: "Sure? Sample accounts will go. Anything you entered yourself stays." },
+    yes_clear: { hi: "हाँ, हटाएँ", mr: "हो, काढा", en: "Yes, clear them" },
+    keep: { hi: "नहीं, रहने दें", mr: "नाही, राहू द्या", en: "No, keep them" },
+    tap_stop: { hi: "बोल चुके? फिर दबाइए", mr: "बोलून झाले? पुन्हा दाबा", en: "Done speaking? Tap again" },
+    set_privacy_stt: { hi: "इस सर्वर पर आवाज़ की पहचान चालू है: बोलते समय आपकी आवाज़ पहचान सेवा को भेजी जाती है, सेव नहीं होती।", mr: "या सर्व्हरवर आवाज ओळख चालू आहे: बोलताना आवाज ओळख सेवेला पाठवला जातो, सेव्ह होत नाही.", en: "Speech recognition is on for this server: while you speak, your voice is sent to the recognition service. It is not stored." },
   };
   const SPEECH_LANG = { hi: "hi-IN", mr: "mr-IN", en: "en-IN" };
+  const MONTHS = {
+    hi: ["जन", "फ़र", "मार्च", "अप्रै", "मई", "जून", "जुल", "अग", "सित", "अक्टू", "नव", "दिस"],
+    mr: ["जाने", "फेब्रु", "मार्च", "एप्रि", "मे", "जून", "जुलै", "ऑग", "सप्टें", "ऑक्टो", "नोव्हें", "डिसें"],
+    en: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+  };
+  const REL = { hi: ["आज", "कल", "परसों"], mr: ["आज", "उद्या", "परवा"], en: ["today", "tomorrow", "day after tomorrow"] };
 
   // ------------------------------------------------------------ state
   const S = {
@@ -91,6 +115,14 @@
   const $ = (s, r = document) => r.querySelector(s);
   const t = (k, vars = {}) => (UI[k]?.[S.lang] ?? UI[k]?.hi ?? k).replace(/\{(\w+)\}/g, (_, v) => vars[v] ?? "");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  function dayDiff(iso) {
+    const d = new Date(iso + "T00:00:00"), n = new Date(); n.setHours(0, 0, 0, 0);
+    return Math.round((d - n) / 864e5);
+  }
+  function whenLabel(iso) {
+    const diff = dayDiff(iso), d = new Date(iso + "T00:00:00");
+    return diff >= 0 && diff <= 2 ? REL[S.lang][diff] : `${d.getDate()} ${MONTHS[S.lang][d.getMonth()]}`;
+  }
   const inr = (x) => "₹" + Math.round(Math.abs(+x || 0)).toLocaleString("en-IN");
 
   // ------------------------------------------------------------ api
@@ -132,7 +164,7 @@
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   function listen({ onInterim, short = false } = {}) {
     return new Promise((resolve, reject) => {
-      if (!SR) return reject(new Error("nospeech"));
+      if (!SR) return canRecord() ? listenRecorded().then(resolve, reject) : reject(new Error("nospeech"));
       stopListening();
       const rec = new SR();
       rec.lang = SPEECH_LANG[S.lang];
@@ -155,8 +187,62 @@
       try { rec.start(); } catch (e) { reject(e); }
     });
   }
+  // Browsers without built-in speech recognition (Safari, Firefox, iPhone): record a short clip and
+  // let the server transcribe it. Only offered when the server has STT_API_KEY set.
+  const canRecord = () => !!(S.config.stt && window.MediaRecorder && navigator.mediaDevices?.getUserMedia);
+  const canListen = () => !!SR || canRecord();
+
+  async function listenRecorded() {
+    stopListening();
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (e) { throw new Error(e.name === "NotAllowedError" || e.name === "SecurityError" ? "not-allowed" : "audio-capture"); }
+    const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"].find((m) => MediaRecorder.isTypeSupported(m)) || "";
+    const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    const chunks = [];
+    S.recorder = rec; S.recDiscard = false; S.listening = true; setMic(true);
+    const hint = $("#micHint"); if (hint) hint.textContent = t("tap_stop");
+    // stop by itself after about a second of quiet (or 9 s at most), so the shop owner just talks
+    let ac, timer;
+    const t0 = Date.now(); let spoke = false, quietSince = Date.now();
+    try {
+      ac = new (window.AudioContext || window.webkitAudioContext)();
+      const an = ac.createAnalyser(); an.fftSize = 512;
+      ac.createMediaStreamSource(stream).connect(an);
+      const buf = new Uint8Array(an.fftSize);
+      timer = setInterval(() => {
+        an.getByteTimeDomainData(buf);
+        let sum = 0; for (const v of buf) sum += ((v - 128) / 128) ** 2;
+        const loud = Math.sqrt(sum / buf.length) > 0.03, now = Date.now();
+        if (loud) { spoke = true; quietSince = now; }
+        if ((spoke && now - quietSince > 1200) || (!spoke && now - t0 > 6000) || now - t0 > 9000) { if (rec.state !== "inactive") rec.stop(); }
+      }, 100);
+    } catch (_) { timer = setTimeout(() => { if (rec.state !== "inactive") rec.stop(); }, 6000); }
+    return new Promise((resolve, reject) => {
+      rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+      rec.onerror = () => reject(new Error("audio-capture"));
+      rec.onstop = async () => {
+        clearInterval(timer); clearTimeout(timer);
+        stream.getTracks().forEach((tr) => tr.stop()); try { ac && ac.close(); } catch (_) {}
+        S.recorder = null; S.listening = false; setMic(false);
+        const blob = new Blob(chunks, { type: rec.mimeType || mime || "audio/webm" });
+        if (S.recDiscard || blob.size < 1500) return resolve("");
+        const h = $("#micHint"); if (h) h.textContent = t("thinking");
+        try {
+          const r = await fetch(`/api/transcribe?lang=${S.lang}`, { method: "POST", headers: { "Content-Type": blob.type }, body: blob });
+          if (r.status === 401) { showLock(); return reject(new Error("locked")); }
+          if (!r.ok) return resolve("");
+          resolve(((await r.json()).text || "").trim());
+        } catch (_) { reject(new Error("network")); }
+        finally { const h2 = $("#micHint"); if (h2) h2.textContent = t("tap"); }
+      };
+      rec.start();
+    });
+  }
+
   function stopListening() {
     if (S.rec) { try { S.rec.abort(); } catch (_) {} S.rec = null; }
+    if (S.recorder && S.recorder.state !== "inactive") { S.recDiscard = true; try { S.recorder.stop(); } catch (_) {} }
     S.listening = false; setMic(false);
   }
   function setMic(on) {
@@ -189,8 +275,9 @@
 
   // ------------------------------------------------------------ core flow
   async function onMic() {
+    if (S.listening && S.recorder) { S.recorder.stop(); return; }      // tap again = done speaking, send it
     if (S.listening) { stopListening(); return; }
-    if (!SR) { showReply(t("no_speech")); $("#typeInput")?.focus(); return; }
+    if (!canListen()) { showReply(t("no_speech")); $("#typeInput")?.focus(); return; }
     speechSynthesis?.cancel();
     $("#heard").textContent = "";
     try {
@@ -199,7 +286,8 @@
       $("#heard").textContent = "“" + text + "”";
       await handleText(text);
     } catch (e) {
-      if (e.message === "not-allowed") showReply(t("mic_denied"));
+      if (e.message === "locked") return;
+      if (e.message === "not-allowed" || e.message === "audio-capture") showReply(t("mic_denied"));
       else if (e.message === "network" && !navigator.onLine) showReply(t("offline", { n: queue().length }));
       else if (e.message !== "aborted" && e.message !== "no-speech") showReply(t("didnt_hear"));
       else if (e.message === "no-speech") showReply(t("didnt_hear"));
@@ -238,6 +326,9 @@
       case "choose":
         S.ctx = null;
         return openChoose(res);
+      case "promise":
+        S.ctx = null;
+        showReply(res.say); refreshHome(); return speak(res.say);
       case "undone":
         S.ctx = null;
         showReply(res.say); refreshHome(); return speak(res.say);
@@ -252,7 +343,7 @@
 
   async function followUp() {
     // ask the missing piece and listen right away, hands-free
-    if (!SR) { $("#typeInput")?.focus(); return; }
+    if (!canListen()) { $("#typeInput")?.focus(); return; }
     try {
       $("#heard").textContent = "";
       const text = await listen({ onInterim: (s) => { $("#heard").textContent = s; } });
@@ -269,6 +360,7 @@
       <div class="s-amt num ${e.type}">${inr(e.amount)}</div>
       <span class="tag ${e.type}">${t(e.type)}</span>
       ${e.note ? `<div class="s-note">${esc(e.note)}</div>` : ""}
+      ${e.promise_date && e.type === "credit" ? `<div class="s-promise">📅 ${esc(t("promise_line", { when: whenLabel(e.promise_date) }))}</div>` : ""}
       ${e.transcript ? `<div class="s-heard">${t("heard")}: “${esc(e.transcript)}”</div>` : ""}
     </div>`;
   }
@@ -284,6 +376,7 @@
         <button class="yes" id="yesBtn">${t("save")}</button>
       </div>
       <button class="swap" id="swapBtn">${entry.type === "credit" ? t("swap_to_payment") : t("swap_to_credit")}</button>`;
+    $("#toast").hidden = true;                       // never let the previous entry's Undo bar cover Yes/No
     $("#sheet").hidden = false;
     $("#yesBtn").onclick = () => saveEntry();
     $("#noBtn").onclick = () => rejectEntry();
@@ -291,6 +384,7 @@
       clearTimer(); stopListening();
       entry.type = entry.type === "credit" ? "payment" : "credit";
       entry.type_defaulted = false;
+      if (entry.type === "payment") entry.promise_date = null;      // a payment is not a promise
       const r = await api("/api/confirm-text", { method: "POST", body: { entry, lang: S.lang } });
       openConfirm(entry, r.say);
     };
@@ -333,7 +427,8 @@
     try {
       const r = await api("/api/entries", { method: "POST", body: {
         customer_id: e.customer_id, name: e.name, amount: e.amount, type: e.type,
-        note: e.note, transcript: e.transcript, lang: S.lang, source: S.lastSource || "voice" } });
+        note: e.note, transcript: e.transcript, lang: S.lang, source: S.lastSource || "voice",
+        promise_date: e.type === "credit" ? (e.promise_date || null) : null } });
       showReply(r.say);
       toast(r.say, async () => {
         await api(`/api/entries/${r.entry.id}/cancel`, { method: "POST" });
@@ -365,6 +460,7 @@
         ${res.candidates.map((c) => `<button data-id="${c.id}"><span>${esc(c.name)}</span><span class="num">${inr(c.balance)}</span></button>`).join("")}
         ${res.for === "entry" ? `<button data-new="1"><span>${esc(t("new_with_name", { name: pending.name }))}</span><span>＋</span></button>` : ""}
       </div>`;
+    $("#toast").hidden = true;
     $("#sheet").hidden = false;
     card.querySelectorAll("button").forEach((b) => b.onclick = async () => {
       closeSheet();
@@ -414,7 +510,18 @@
   }
 
   async function viewHome() {
-    $("#view").innerHTML = `
+    const welcome = localStorage.getItem("bk_welcomed") ? "" : `
+      <section class="welcome" id="welcome" aria-label="welcome">
+        <h2>${t("welcome_title")}</h2>
+        <ol><li>${t("welcome_1")}</li><li>${t("welcome_2")}</li><li>${t("welcome_3")}</li></ol>
+        <button class="btn primary" id="welcomeOk">${t("got_it")}</button>
+      </section>`;
+    const demo = S.config.demo ? `
+      <section class="demo-banner" id="demoBanner">
+        <p>${t("demo_banner")}</p>
+        <button class="btn ghost" id="demoClear">${t("demo_clear")}</button>
+      </section>` : "";
+    $("#view").innerHTML = `${welcome}${demo}
       <section class="today" aria-label="today">
         <div><div class="lbl">${t("today_given")}</div><div class="amt credit num" id="tGiven">—</div></div>
         <div><div class="lbl">${t("today_got")}</div><div class="amt payment num" id="tGot">—</div></div>
@@ -431,16 +538,30 @@
         </form>
       </section>
       <div class="reply" id="reply" hidden role="status"></div>
+      <section class="promises" id="promises" hidden></section>
       <h2>${t("recent")}</h2>
       <ul class="ledger" id="recent"></ul>`;
     $("#mic").onclick = onMic;
+    if ($("#welcomeOk")) $("#welcomeOk").onclick = () => { localStorage.setItem("bk_welcomed", "1"); $("#welcome").remove(); };
+    if ($("#demoClear")) $("#demoClear").onclick = () => demoClearFlow($("#demoBanner"));
     $("#typeForm").onsubmit = (ev) => {
       ev.preventDefault();
       const v = $("#typeInput").value; $("#typeInput").value = "";
       $("#heard").textContent = v ? "“" + v + "”" : ""; handleText(v, { source: "typed" });
     };
-    if (!SR) showReply(t("no_speech"));
+    if (!canListen()) showReply(t("no_speech"));
     refreshHome();
+  }
+
+  function demoClearFlow(host) {
+    host.innerHTML = `<p>${t("demo_sure")}</p>
+      <div class="set-row"><button class="btn primary" id="demoYes">${t("yes_clear")}</button><button class="btn ghost" id="demoNo">${t("keep")}</button></div>`;
+    $("#demoNo").onclick = () => router();
+    $("#demoYes").onclick = async () => {
+      try { await api("/api/demo/clear", { method: "POST", body: {} }); S.config.demo = false; }
+      catch (e) { if (e.message === "locked") return; }
+      router();
+    };
   }
 
   async function refreshHome() {
@@ -449,7 +570,15 @@
       const s = await api("/api/summary");
       $("#tGiven").textContent = inr(s.today_given);
       $("#tGot").textContent = inr(s.today_collected);
-      $("#pendingLine").innerHTML = `${t("pending")}: <b class="num">${inr(s.outstanding)}</b>, ${t("from_n", { n: s.customers_due })}`;
+      $("#pendingLine").innerHTML = `${t("pending")}: <b class="num">${inr(s.outstanding)}</b>, ${S.lang === "en" && s.customers_due === 1 ? "from 1 customer" : t("from_n", { n: s.customers_due })}`;
+      const box = $("#promises");
+      if (box) {
+        box.hidden = !s.promises.length;
+        box.innerHTML = s.promises.length ? `<h2>${t("promises_title")}</h2><ul class="ledger plist">${s.promises.map((x) => `
+          <li><a class="who" href="#/c/${x.customer_id}">${esc(x.name)}
+              <small class="chip c-${x.state}">${x.state === "overdue" ? t("p_overdue") + " · " + esc(whenLabel(x.promise_date)) : x.state === "today" ? t("p_today") : esc(whenLabel(x.promise_date))}</small></a>
+            <span class="val num credit">${inr(x.balance)}</span></li>`).join("")}</ul>` : "";
+      }
       $("#recent").innerHTML = s.recent.length ? s.recent.map((e) => rowHTML(e)).join("") : `<li class="empty empty-row">${t("no_entries")}</li>`;
     } catch (_) { /* offline: keep what is shown */ }
   }
@@ -481,6 +610,14 @@
       <div class="actions">
         ${due ? `<a class="btn wa" href="${esc(c.whatsapp_url)}" target="_blank" rel="noopener noreferrer">💬 ${t("remind")}</a>` : ""}
       </div>
+      ${due ? `<section class="promise-box" aria-label="${t("set_when")}">
+        <div class="lbl">${t("set_when")}</div>
+        ${c.promise_date ? `<div class="p-now ${dayDiff(c.promise_date) < 0 ? "overdue" : ""}">📅 ${esc(t("promise_line", { when: whenLabel(c.promise_date) }))}${dayDiff(c.promise_date) < 0 ? " · " + t("p_overdue") : ""}</div>` : ""}
+        <form class="set-row" id="promiseForm">
+          <input type="date" id="pDate" required min="${new Date().toLocaleDateString("en-CA")}" value="${esc(c.promise_date || "")}" aria-label="${t("set_when")}">
+          <button class="btn ghost">${t("save_phone")}</button>
+          ${c.promise_date ? `<button type="button" class="btn ghost" id="pClear">${t("clear_promise")}</button>` : ""}
+        </form></section>` : ""}
       <form class="phone" id="phoneForm">
         <input id="phone" inputmode="tel" maxlength="20" pattern="\\+?[0-9][0-9 \\-]{6,18}" placeholder="${t("phone")}" value="${esc(c.phone || "")}" aria-label="${t("phone")}">
         <button class="btn ghost">${t("save_phone")}</button>
@@ -495,6 +632,11 @@
         viewCustomer(id);
       } catch (e) { if (e.message !== "locked") { $("#phone").setCustomValidity(t("phone")); $("#phone").reportValidity(); } }
     };
+    if ($("#promiseForm")) {
+      const setP = async (v) => { try { await api(`/api/customers/${id}`, { method: "PATCH", body: { promise_date: v } }); viewCustomer(id); } catch (e) { if (e.message !== "locked") { $("#pDate").setCustomValidity(t("set_when")); $("#pDate").reportValidity(); } } };
+      $("#promiseForm").onsubmit = (ev) => { ev.preventDefault(); setP($("#pDate").value); };
+      if ($("#pClear")) $("#pClear").onclick = () => setP("");
+    }
     $("#view").querySelectorAll("[data-cancel]").forEach((b) => b.onclick = async () => {
       await api(`/api/entries/${b.dataset.cancel}/cancel`, { method: "POST" });
       viewCustomer(id);
@@ -568,10 +710,14 @@
         <h3>${t("set_export")}</h3><p>${t("set_export_help")}</p>
         <a class="btn ghost" href="/api/export.csv" download>⬇ ${t("export_btn")}</a>
       </section>
+      ${s.demo ? `<section class="set-block" id="demoBlock"><h3>${t("demo_banner")}</h3>
+        <button class="btn ghost" id="demoClear2">${t("demo_clear")}</button></section>` : ""}
       <section class="set-block">
         <h3>${t("set_privacy")}</h3><p>${t("set_privacy_help")}</p>
+        ${s.stt ? `<p>${t("set_privacy_stt")}</p>` : ""}
       </section>
       <div class="version">Bolo Khata v${esc(s.version)}</div>`;
+    if ($("#demoClear2")) $("#demoClear2").onclick = () => demoClearFlow($("#demoBlock"));
     const msg = (id, text, err) => { const el = $(id); el.textContent = text; el.classList.toggle("err", !!err); };
     $("#shopForm").onsubmit = async (ev) => {
       ev.preventDefault();

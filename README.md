@@ -22,6 +22,8 @@ Khata apps exist, but they're built around forms: pick a customer, type an amoun
 | Say | What happens |
 |---|---|
 | `Ramesh ne 250 ka saman liya` / `रमेश ने 250 का सामान लिया` | Credit entry → spoken read-back → auto-saves in 5 s unless you say "nahi" |
+| `Ramesh ne 500 ka saman liya, kal dega` / `...will pay tomorrow` | Credit entry **plus a promise date**. It shows on the home screen as *Promised payments* and goes *Overdue* if the day passes |
+| `Ramesh kal dega` | Sets or moves Ramesh's promise date without a new entry |
 | `Sunita ne 500 jama kiye` / `Sunita paid 500` | Payment entry |
 | `Pappu ko 3 packet doodh diya 90 rupaye` | ₹90 credit; "3 packet doodh" kept as the note (quantity ≠ amount) |
 | `Mohan ne dhai sau ka atta liya` | Number words work: dhai sau = 250, saade teen sau = 350, do hazaar paanch sau = 2500 |
@@ -40,10 +42,12 @@ Khata apps exist, but they're built around forms: pick a customer, type an amoun
 - **Unclear credit or payment?** It defaults to udhaar and *says so*. One tap switches it.
 - **Mistakes:** 30-second undo toast, voice undo, and per-entry cancel. Nothing is ever hard-deleted; every change is in `/api/audit`.
 - **Weak internet:** the app shell is cached (PWA). Entries spoken or typed offline are queued on the phone and processed when the network returns. Ledger data itself is never cached on the device.
+- **Promises are tracked, not forgotten.** *"Kal dega"*, *"parso"*, *"shaam tak"*, *"do din mein"*, *"agle hafte"* become a date. The home screen lists who promised what, and the WhatsApp reminder for an overdue promise says *"you had said you would pay by 27 Nov"*. A full payment clears the promise.
 - **WhatsApp reminder** in one tap, with the exact balance, in the shop's language.
 - **Three languages:** Hindi, Marathi, English (UI, speech recognition and spoken replies).
 - **PIN lock** (optional, Settings): once set, nobody else on the shop Wi-Fi can open the ledger. 5 wrong tries lock it.
 - **Your data is yours:** download the whole ledger as CSV (opens in Excel) from Settings.
+- **Starts empty when you want it to.** A first-run welcome explains the three steps, and *Clear samples and start my shop* removes the demo ledger in two taps without touching anything you entered.
 
 ## Run it
 
@@ -51,9 +55,9 @@ Khata apps exist, but they're built around forms: pick a customer, type an amoun
 docker compose up
 ```
 
-Open **http://localhost:8000** in **Chrome** (desktop or Android) and allow the microphone. No `.env` and no API keys needed. It starts with 10 demo customers.
+Open **http://localhost:8000** in **Chrome** (desktop or Android) and allow the microphone. No `.env` and no API keys needed. It starts with 10 demo customers (clear them any time from the home screen or Settings).
 
-> Speech recognition uses the browser's Web Speech API (`hi-IN`, `mr-IN`, `en-IN`), which Chrome supports. In other browsers, use the text box under the mic; everything else works the same.
+> Speech recognition uses the browser's Web Speech API (`hi-IN`, `mr-IN`, `en-IN`), which Chrome and Edge support. In Safari, Firefox or on an iPhone the app records a short clip and sends it to a speech-to-text provider **if you set `STT_API_KEY`** (any OpenAI-compatible `/audio/transcriptions` endpoint, e.g. OpenAI, Groq or a self-hosted Whisper). With no key, the text box under the mic always works and everything else is identical.
 
 ### Without Docker
 ```bash
@@ -66,7 +70,9 @@ uvicorn app.main:app --reload
 ```bash
 cd backend && pip install -r requirements-dev.txt && pytest
 ```
-65 tests cover Hindi, Hinglish, Marathi and English sentences, number words, quantity-vs-amount, follow-up questions, ambiguous names, voice undo, the full API flow, and security: PIN lock and brute-force lockout, hashed PIN and sessions, CSRF and origin checks, input limits, CSV formula injection, rate limits, headers, and LLM output validation.
+108 tests cover Hindi, Hinglish, Marathi and English sentences, number words, quantity-vs-amount, promise dates, follow-up questions, ambiguous names, voice undo, the full API flow, the speech-to-text fallback, and security: PIN lock and brute-force lockout, hashed PIN and sessions, CSRF and origin checks, input limits, CSV formula injection, rate limits, headers, and LLM output validation.
+
+**Parser accuracy** is measured, not claimed: `backend/tests/phrases.py` holds 73 counter sentences across Hindi, Hinglish, Marathi and English (entries, balances, shop-level questions, undo, promises). The first 58 were used to find bugs (89.7% before the fixes, 100% after); the next 15 were written afterwards and never tuned against and also pass. CI fails if accuracy drops below 92%, so a parser change can't quietly make it worse. This is a regression set written by the author, not a benchmark of real shop audio; measuring on real recordings is the first pilot task.
 
 CI runs the tests, **bandit** (static security analysis), **pip-audit** (known CVEs in dependencies) and a `docker compose up` smoke test on every push.
 
@@ -98,6 +104,11 @@ See [`.env.example`](.env.example).
 | `RATE_LIMIT_PER_MIN` | `240` | API requests per minute per IP |
 | `ENABLE_API_DOCS` | `false` | Interactive docs at `/docs` |
 | `SESSION_DAYS` | `30` | How long a device stays unlocked after entering the PIN |
+| `STT_API_KEY` | *(empty)* | Optional. Turns on the speech-to-text fallback for browsers without built-in recognition |
+| `STT_BASE_URL` | OpenAI | Any OpenAI-compatible `/audio/transcriptions` endpoint (Groq, self-hosted Whisper…) |
+| `STT_MODEL` | `whisper-1` | Model name (e.g. `whisper-large-v3-turbo` on Groq) |
+| `STT_LIMIT_PER_MIN` | `20` | Transcription requests per minute per IP (it costs money, so it is capped separately) |
+| `STT_MAX_BYTES` | `700000` | Largest audio clip accepted (about 25 s) |
 
 ## How it works
 
@@ -122,12 +133,14 @@ See [`.env.example`](.env.example).
 ### API
 | Method | Path | |
 |---|---|---|
-| POST | `/api/interpret` | `{text, lang, context?}` → `confirm` / `clarify` / `choose` / `answer` / `undone` / `unknown` |
+| POST | `/api/interpret` | `{text, lang, context?}` → `confirm` / `clarify` / `choose` / `promise` / `answer` / `undone` / `unknown` |
+| POST | `/api/transcribe?lang=` | Audio clip → text. Only when `STT_API_KEY` is set (otherwise 501) |
+| POST | `/api/demo/clear` | Remove the sample ledger (never touches real entries) |
 | POST | `/api/entries` | Save an entry (`customer_id` or `name`, `amount`, `type`) |
 | POST | `/api/entries/{id}/cancel` | Cancel (soft) |
 | GET | `/api/summary` | Today's credit and collections, total pending, recent entries |
 | GET | `/api/customers` · `/api/customers/{id}` | Balances, history, WhatsApp reminder link |
-| PATCH | `/api/customers/{id}` | Save a phone number |
+| PATCH | `/api/customers/{id}` | Save a phone number or a promise date (`""` clears it) |
 | GET | `/api/audit` | Every change, ever |
 | GET/PATCH | `/api/settings` | Shop name, PIN status |
 | POST | `/api/auth/login` · `/logout` · `/pin` | Unlock, lock, set/change/remove PIN |
@@ -137,7 +150,8 @@ See [`.env.example`](.env.example).
 
 | Dependency | Used for | Cost | Risk and mitigation |
 |---|---|---|---|
-| Chrome Web Speech API | Speech-to-text | Free | Needs Chrome and internet. The text box always works; next step is a pluggable STT adapter (Sarvam / Bhashini / Whisper) for offline-first Android |
+| Chrome Web Speech API | Speech-to-text (default) | Free | Needs Chrome/Edge and internet. Fallbacks: the text box always works, and the optional server-side STT (below) covers Safari, Firefox and iPhone |
+| Optional STT provider (`STT_API_KEY`) | Speech-to-text everywhere | About ₹0.5 per minute of audio on hosted Whisper; one entry is ~3 seconds | Off by default; audio is forwarded, never stored; capped at 20 clips/min/IP and 700 KB each. If the provider is down the app returns an empty result and the user types instead |
 | Browser speechSynthesis | Spoken replies | Free | Marathi voices are missing on some phones; falls back to the Hindi voice |
 | Optional LLM | Odd sentences | ~₹0.01 per entry with a small model | Off by default; rules parser is the fallback |
 | WhatsApp `wa.me` links | Reminders | Free | Owner presses send; no WhatsApp Business API needed |
@@ -145,6 +159,7 @@ See [`.env.example`](.env.example).
 ## Roadmap
 - Pilot at my father's store and 10 nearby shops: measure the share of udhaar captured vs the notebook, seconds per entry, and recovery of 30+ day dues.
 - Android wrapper with on-device STT for no-network shops.
+- Promise reminders pushed to the owner each morning (today the list is on the home screen).
 - Learn each shop's customer names and nicknames over time.
 - Weekly "who to remind" voice summary.
 

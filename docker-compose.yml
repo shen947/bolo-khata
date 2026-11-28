@@ -17,6 +17,10 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
       LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      STT_API_KEY: ${STT_API_KEY:-}
+      STT_BASE_URL: ${STT_BASE_URL:-https://api.openai.com/v1}
+      STT_MODEL: ${STT_MODEL:-whisper-1}
+      STT_LIMIT_PER_MIN: ${STT_LIMIT_PER_MIN:-20}
     volumes:
       - khata-data:/data
     read_only: true

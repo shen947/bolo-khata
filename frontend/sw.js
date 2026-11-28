@@ -1,6 +1,6 @@
 // Offline shell only. Ledger data (/api/*) is NEVER cached on the device, so a
 // locked or shared phone does not leak balances through Cache Storage.
-const CACHE = "bolo-khata-v2";
+const CACHE = "bolo-khata-v3";
 const SHELL = [
   "/", "/static/styles.css", "/static/app.js", "/static/icons/icon.svg", "/manifest.webmanifest",
   "/static/fonts/mukta-devanagari-400-normal.woff2", "/static/fonts/mukta-devanagari-600-normal.woff2",

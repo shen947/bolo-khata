@@ -5,19 +5,21 @@ import os
 import re
 import urllib.parse
 from contextlib import asynccontextmanager
+from datetime import date, timedelta
 from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from . import db, llm, security
+from . import db, llm, security, stt
 from .parser import parse
-from .replies import say, inr
+from .replies import say, inr, when_label
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 ENV_SHOP_NAME = os.getenv("SHOP_NAME", "Singh General Store")
 FRONTEND = os.getenv("FRONTEND_DIR", os.path.join(os.path.dirname(__file__), "..", "..", "frontend"))
 DOCS = os.getenv("ENABLE_API_DOCS", "false").lower() == "true"
@@ -71,6 +73,7 @@ class Context(BaseModel):
     type_defaulted: Optional[bool] = False
     note: Optional[str] = Field(None, max_length=120)
     transcript: Optional[str] = Field(None, max_length=300)
+    promise_date: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$")
     model_config = {"extra": "ignore"}
 
 
@@ -89,6 +92,25 @@ class EntryIn(BaseModel):
     transcript: Optional[str] = Field(None, max_length=300)
     lang: Lang = "hi"
     source: Literal["voice", "typed", "offline", "manual"] = "voice"
+    promise_date: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+    @field_validator("promise_date")
+    @classmethod
+    def _promise(cls, v):
+        return _check_promise(v)
+
+
+def _check_promise(v):
+    """A promise must be a real date between today and a year ahead (or empty to clear it)."""
+    if v in (None, ""):
+        return None
+    try:
+        d = date.fromisoformat(v)
+    except ValueError:
+        raise ValueError("promise_date must be YYYY-MM-DD")
+    if not (date.today() <= d <= date.today() + timedelta(days=366)):
+        raise ValueError("promise_date must be within the next year")
+    return d.isoformat()
 
 
 PHONE_RE = re.compile(r"^\+?[0-9][0-9 \-]{6,18}$")
@@ -97,6 +119,12 @@ PHONE_RE = re.compile(r"^\+?[0-9][0-9 \-]{6,18}$")
 class CustomerIn(BaseModel):
     name: Optional[str] = Field(None, max_length=60)
     phone: Optional[str] = Field(None, max_length=20)
+    promise_date: Optional[str] = Field(None, max_length=10)
+
+    @field_validator("promise_date")
+    @classmethod
+    def _promise(cls, v):
+        return _check_promise(v)
 
     @field_validator("phone")
     @classmethod
@@ -143,7 +171,7 @@ def health():
 
 @app.get("/api/config")
 def config():
-    return {"shop_name": shop_name(), "llm": llm.enabled(),
+    return {"shop_name": shop_name(), "llm": llm.enabled(), "stt": stt.enabled(), "demo": db.has_demo(),
             "default_lang": os.getenv("DEFAULT_LANG", "hi"), "version": VERSION}
 
 
@@ -215,7 +243,8 @@ def set_pin(body: PinChangeIn, request: Request):
 @app.get("/api/settings")
 def get_settings():
     return {"shop_name": shop_name(), "pin_enabled": security.pin_enabled(),
-            "store_transcripts": db.STORE_TRANSCRIPTS, "llm": llm.enabled(), "version": VERSION}
+            "store_transcripts": db.STORE_TRANSCRIPTS, "llm": llm.enabled(), "stt": stt.enabled(),
+            "demo": db.has_demo(), "version": VERSION}
 
 
 @app.patch("/api/settings")
@@ -247,11 +276,40 @@ def export_csv():
                     headers={"Content-Disposition": 'attachment; filename="bolo-khata-export.csv"'})
 
 
+@app.post("/api/demo/clear")
+def clear_demo():
+    """Remove the sample ledger so the shop starts empty. Real entries are never touched."""
+    if not db.has_demo():
+        return {"removed": 0}
+    return {"removed": db.clear_demo()}
+
+
 # ---------------------------------------------------------------- voice
+@app.post("/api/transcribe")
+async def transcribe(request: Request, lang: Lang = "hi"):
+    """Fallback for browsers with no built-in speech recognition. Off unless STT_API_KEY is set."""
+    if not stt.enabled():
+        raise HTTPException(501, "Speech-to-text is not configured")
+    ctype = request.headers.get("content-type", "")
+    if not stt.ext_for(ctype):
+        raise HTTPException(415, "Unsupported audio type")
+    data = bytearray()
+    async for chunk in request.stream():          # cap the real size, not just the declared one
+        data += chunk
+        if len(data) > stt.MAX_BYTES:
+            raise HTTPException(413, "Audio too long")
+    text = await run_in_threadpool(stt.transcribe, bytes(data), ctype, lang)
+    return {"text": text or ""}
+
+
 def _parse(text, context):
     p = llm.parse_llm(text, context) if llm.enabled() else None
+    rules = parse(text, context)
     if p is None or p.intent == "unknown":
-        p = parse(text, context)
+        return rules
+    p.promise_days = rules.promise_days            # dates come from the rules parser (deterministic)
+    if rules.intent == "promise":
+        return rules
     return p
 
 
@@ -307,9 +365,29 @@ def interpret(body: InterpretIn):
         key = "balance" if c["balance"] > 0 else "balance_zero"
         return base | {"kind": "answer", "customer": c, "say": say(key, lang, name=c["name"], bal=c["balance"])}
 
+    if p.intent == "promise" and p.name and p.promise_days is not None:
+        status, matches = db.match_customers(p.name)
+        if status == "new":
+            return base | {"kind": "answer", "say": say("promise_unknown", lang, name=p.name)}
+        if status == "ambiguous":
+            return base | {"kind": "answer", "say": say("promise_which", lang, name=p.name)}
+        c = matches[0]
+        if c["balance"] <= 0:
+            return base | {"kind": "answer", "say": say("promise_nodebt", lang, name=c["name"])}
+        when = (date.today() + timedelta(days=p.promise_days)).isoformat()
+        db.set_promise(c["id"], when)
+        return base | {"kind": "promise", "customer_id": c["id"], "promise_date": when,
+                       "say": say("promise_saved", lang, name=c["name"], when=when_label(when, lang))}
+
     if p.intent == "entry":
+        promise = None
+        if p.promise_days is not None and (p.type or "credit") == "credit":
+            promise = (date.today() + timedelta(days=p.promise_days)).isoformat()
+        elif ctx.get("promise_date"):
+            promise = _check_promise_quiet(ctx["promise_date"])
         pending = {"name": p.name, "amount": p.amount, "type": p.type or "credit",
-                   "type_defaulted": p.type_defaulted, "note": p.note, "transcript": clean(p.transcript, 300)}
+                   "type_defaulted": p.type_defaulted, "note": p.note, "transcript": clean(p.transcript, 300),
+                   "promise_date": promise if (p.type or "credit") == "credit" else None}
         if p.amount is None:
             return base | {"kind": "clarify", "awaiting": "amount", "pending": pending,
                            "say": say("ask_amount", lang, name=p.name or "")}
@@ -330,12 +408,21 @@ def interpret(body: InterpretIn):
     return base | {"kind": "unknown", "say": say("unknown", lang)}
 
 
+def _check_promise_quiet(v):
+    try:
+        return _check_promise(v)
+    except ValueError:
+        return None
+
+
 def confirm_text(e, lang):
     key = "confirm_credit" if e.get("type") == "credit" else "confirm_payment"
     parts = []
     if e.get("is_new"):
         parts.append(say("new_customer", lang, name=e.get("name") or ""))
     parts.append(say(key, lang, name=e.get("name") or "", amt=e.get("amount") or 0))
+    if e.get("promise_date") and e.get("type") == "credit":
+        parts.append(say("promise_with", lang, when=when_label(e["promise_date"], lang)))
     if e.get("type_defaulted"):
         parts.append(say("defaulted", lang))
     return " ".join(parts)
@@ -362,6 +449,10 @@ def create_entry(body: EntryIn):
     e = db.add_entry(cid, body.amount, body.type, clean(body.note, 120), clean(body.transcript, 300),
                      body.lang, body.source)
     c = db.get_customer(cid)
+    if body.type == "credit" and body.promise_date and c["balance"] > 0:
+        c = db.set_promise(cid, body.promise_date)
+    elif c["balance"] <= 0 and c.get("promise_date"):
+        c = db.set_promise(cid, None)               # debt cleared: drop the promise
     lang = body.lang
     if c["balance"] > 0:
         msg = say("saved", lang, name=c["name"], bal=c["balance"])
@@ -407,7 +498,11 @@ def customer(cid: int, lang: Lang = "hi"):
     c = db.get_customer(cid)
     if not c:
         raise HTTPException(404, "customer not found")
-    msg = say("reminder", lang, name=c["name"], shop=shop_name(), bal=max(c["balance"], 0))
+    if c["balance"] > 0 and c.get("promise_date") and c["promise_date"] < date.today().isoformat():
+        msg = say("reminder_overdue", lang, name=c["name"], shop=shop_name(), bal=c["balance"],
+                  when=when_label(c["promise_date"], lang))
+    else:
+        msg = say("reminder", lang, name=c["name"], shop=shop_name(), bal=max(c["balance"], 0))
     wa = f"https://wa.me/{_wa_phone(c['phone'])}?text={urllib.parse.quote(msg, safe='')}"
     return c | {"entries": db.customer_entries(cid), "reminder_text": msg, "whatsapp_url": wa}
 
@@ -416,7 +511,12 @@ def customer(cid: int, lang: Lang = "hi"):
 def patch_customer(cid: int, body: CustomerIn):
     if not db.get_customer(cid):
         raise HTTPException(404, "customer not found")
-    return db.update_customer(cid, clean(body.name, 60), body.phone)
+    sent = body.model_fields_set
+    if "promise_date" in sent:
+        db.set_promise(cid, body.promise_date)
+    if sent & {"name", "phone"}:
+        return db.update_customer(cid, clean(body.name, 60), body.phone)
+    return db.get_customer(cid)
 
 
 @app.get("/api/audit")

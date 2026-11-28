@@ -126,12 +126,61 @@ T = {
         "mr": "माफ करा, समजले नाही. असे बोला: रमेशने 250 रुपयांचे सामान घेतले.",
         "en": "Sorry, I didn't get that. Try: Ramesh took 250 on credit.",
     },
+    "promise_with": {
+        "hi": "{when} देने का वादा।",
+        "mr": "{when} देण्याचे वचन.",
+        "en": "Promised for {when}.",
+    },
+    "promise_saved": {
+        "hi": "ठीक है, {name} {when} देंगे। मैं याद दिलाऊँगा।",
+        "mr": "ठीक आहे, {name} {when} देतील. मी आठवण करून देईन.",
+        "en": "Okay, {name} will pay {when}. I'll remind you.",
+    },
+    "promise_unknown": {
+        "hi": "{name} नाम का कोई ग्राहक नहीं मिला। पहले उनकी एंट्री बोलिए।",
+        "mr": "{name} नावाचा ग्राहक सापडला नाही. आधी त्यांची नोंद बोला.",
+        "en": "No customer called {name}. Add their entry first.",
+    },
+    "promise_which": {
+        "hi": "कई {name} हैं। पूरा नाम बोलिए।",
+        "mr": "अनेक {name} आहेत. पूर्ण नाव बोला.",
+        "en": "There are several {name}. Say the full name.",
+    },
+    "promise_nodebt": {
+        "hi": "{name} का कुछ बाकी नहीं है।",
+        "mr": "{name} यांचे काही बाकी नाही.",
+        "en": "{name} owes nothing, so there is nothing to promise.",
+    },
+    "reminder_overdue": {
+        "hi": "नमस्ते {name} जी, {shop} पर आपका ₹{bal} बाकी है। आपने {when} तक देने को कहा था। कृपया जमा कर दीजिए। धन्यवाद 🙏",
+        "mr": "नमस्कार {name}, {shop} येथे आपले ₹{bal} बाकी आहेत. आपण {when} पर्यंत देण्याचे सांगितले होते. कृपया जमा करावे. धन्यवाद 🙏",
+        "en": "Namaste {name} ji, you have ₹{bal} pending at {shop}. You had said you would pay by {when}. Please clear it soon. Thank you 🙏",
+    },
     "reminder": {
         "hi": "नमस्ते {name} जी, {shop} पर आपका ₹{bal} बाकी है। सुविधा अनुसार जमा कर दीजिए। धन्यवाद 🙏",
         "mr": "नमस्कार {name}, {shop} येथे आपले ₹{bal} बाकी आहेत. सोयीनुसार जमा करावे. धन्यवाद 🙏",
         "en": "Namaste {name} ji, you have ₹{bal} pending at {shop}. Please clear it when convenient. Thank you 🙏",
     },
 }
+
+
+_MONTHS = {
+    "hi": ["जन", "फ़र", "मार्च", "अप्रै", "मई", "जून", "जुल", "अग", "सित", "अक्टू", "नव", "दिस"],
+    "mr": ["जाने", "फेब्रु", "मार्च", "एप्रि", "मे", "जून", "जुलै", "ऑग", "सप्टें", "ऑक्टो", "नोव्हें", "डिसें"],
+    "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+}
+_REL = {"hi": ("आज", "कल", "परसों"), "mr": ("आज", "उद्या", "परवा"), "en": ("today", "tomorrow", "the day after tomorrow")}
+
+
+def when_label(date_iso, lang="hi", today=None):
+    """'2026-11-29' -> 'कल' / 'tomorrow' / '3 Dec'. Past dates show the date."""
+    from datetime import date
+    lang = lang if lang in _MONTHS else "hi"
+    d = date.fromisoformat(date_iso)
+    delta = (d - (today or date.today())).days
+    if 0 <= delta <= 2:
+        return _REL[lang][delta]
+    return f"{d.day} {_MONTHS[lang][d.month - 1]}"
 
 
 def say(key, lang="hi", **kw):

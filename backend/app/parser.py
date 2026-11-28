@@ -34,11 +34,11 @@ UNITS = {
 }
 MULT = {"sau": 100, "sav": 100, "hundred": 100, "hajar": 1000,
         "hajaar": 1000, "thousand": 1000, "lak": 100000, "lakh": 100000, "lac": 100000}
-FRACT_PREFIX = {"sade": 0.5, "sadhe": 0.5, "sava": 0.25, "pone": -0.25, "paune": -0.25}
+FRACT_PREFIX = {"sade": 0.5, "sadhe": 0.5, "sarhe": 0.5, "sava": 0.25, "pone": -0.25, "paune": -0.25}
 
 # ---------------------------------------------------------------- keywords (normalised)
 CURRENCY = {"rs", "rupe", "rupae", "rupie", "rupia", "rupai", "rupees", "rupes", "rupee", "ru", "rupaia", "rupaie", "rupaye", "inr", "rupei", "rupa", "rupaian", "rupaiache", "rupaiachi"}
-PAYMENT_STRONG = {"jama", "jma", "chukaia", "chukae", "chukai", "vapas", "vapis", "lautae", "lautaia", "lotae", "lotaia", "paid", "pai", "pay", "paiment", "payment", "received", "recived", "receive", "return", "returned", "bhare", "bharle", "bharla", "bharli", "upi", "gpai", "gpay", "fonpe", "phonepe", "paytm", "clear", "cleared", "jmakie", "jamakie"}
+PAYMENT_STRONG = {"jama", "jma", "chukaia", "chukae", "chukai", "chukaie", "vapas", "vapis", "lautae", "lautaia", "lotae", "lotaia", "paid", "pai", "pay", "paiment", "payment", "received", "recived", "receive", "return", "returned", "bhare", "bharle", "bharla", "bharli", "upi", "gpai", "gpay", "fonpe", "phonepe", "paytm", "clear", "cleared", "jmakie", "jamakie"}
 GIVE_VERBS = {"die", "dia", "de", "diia", "dile", "dila", "dili", "deke", "dedie", "gave", "given"}
 CREDIT_KW = {"udhar", "udhari", "udar", "udari", "udhaar", "lia", "le", "lie", "liia", "legaia", "lekar", "leke", "saman", "saaman", "maal", "mal", "credit", "took", "taken", "bought", "ghetle", "ghetla", "ghetli", "ghetale", "nele", "nela", "neli", "khata", "khate", "purchase"}
 MARKERS_SUBJ = {"ne", "ni", "nin"}          # Ramesh ne ... (subject)
@@ -55,6 +55,17 @@ LAST = {"pichli", "pichla", "last", "previous", "akhri", "shevti", "magil", "abh
 YES = {"han", "haan", "ha", "hm", "hmm", "ji", "yes", "sahi", "thik", "thek", "barobar", "ok", "okay", "ho", "hoi", "bilkul", "correct", "right", "save"}
 NO = {"nahi", "nai", "na", "no", "nako", "galat", "wrong", "cancel", "nahin", "mat", "nahi"}
 
+# --- "kal dega" style promises: a time word + a future verb
+FUTURE_VERBS = {"dega", "degi", "denge", "dengi", "dunga", "dungi", "dege", "dene", "dein", "deta", "deti", "deto", "dete",
+                "diel", "deil", "deu", "denar", "denare", "dungaa", "will", "shall", "promised", "promises", "promise"}
+FUTURE_SUFFIX = ("ega", "egi", "enge", "unga", "ungi", "engi")     # lautaega, chukaegi, layenge ...
+T_TOMORROW = {"kal", "udia", "tomorov", "tomoro", "kl"}
+T_AFTER = {"parason", "parava", "parso", "parsu", "parson", "parsoon"}
+T_TODAY = {"aj", "sam", "tonight", "evening", "sanj", "sanjh", "sandhia", "tonite", "today"}
+U_DAY = {"din", "divas", "dinon", "days", "day"}
+U_WEEK = {"hafte", "hafta", "saptah", "week", "weeks", "athvade", "aathvade"}
+U_MONTH = {"mahine", "mahina", "month", "months", "mahinia", "mahinyat"}
+
 STOP = {
     "aj", "abhi", "kal", "sam", "subah", "subh", "rat", "se", "mein", "me", "mai", "par", "pe",
     "aur", "or", "and", "hai", "he", "ha", "tha", "the", "thi", "ho", "hua", "hue", "gaia", "gaya", "gia",
@@ -64,7 +75,7 @@ STOP = {
     "kg", "litre", "liter", "ltr", "gram", "dabba", "bori", "bag", "pis", "piece", "pieces", "aahe",
     "ahe", "ahet", "kele", "keli", "kela", "zale", "jhale", "ata", "atta" , "tak", "liie", "liye", "lie",
     "worth", "of", "credit", "plis", "please", "bhaiia", "entri", "entry", "naam", "nam", "name",
-    "customer", "grahak", "ab", "fir", "phir", "bhi", "does", "did", "much", "how", "what", "kitna",
+    "customer", "grahak", "add", "dalo", "daalo", "jodo", "ab", "fir", "phir", "bhi", "does", "did", "much", "how", "what", "kitna",
 }
 ITEM_HINTS = {"dud", "doodh", "dudh", "ata", "atta", "chaval", "caval", "dal", "tel", "oil", "sabun", "chini", "sugar", "chai", "biskut", "biscuit", "masala", "anda", "ande", "bread", "maida", "rice", "namak", "ghi", "ghee", "surf", "saman", "maal", "mal", "sigret", "gutka", "paneer", "dahi", "makhan", "batter", "butter", "kirana", "rashan", "rasan", "gas", "kerosin"}
 
@@ -77,9 +88,14 @@ UNITS = {norm(k): v for k, v in UNITS.items()}
 MULT = {norm(k): v for k, v in MULT.items()}
 FRACT_PREFIX = {norm(k): v for k, v in FRACT_PREFIX.items()}
 (CURRENCY, PAYMENT_STRONG, GIVE_VERBS, CREDIT_KW, MARKERS_SUBJ, MARKERS_OBJ, MARKERS_POSS,
- QUESTION, DUE_WORDS, TODAY, WHO, TOP, TOTAL, UNDO, LAST, YES, NO, STOP, ITEM_HINTS) = map(_N, (
+ QUESTION, DUE_WORDS, TODAY, WHO, TOP, TOTAL, UNDO, LAST, YES, NO, STOP, ITEM_HINTS,
+ FUTURE_VERBS, T_TOMORROW, T_AFTER, T_TODAY, U_DAY, U_WEEK, U_MONTH) = map(_N, (
     CURRENCY, PAYMENT_STRONG, GIVE_VERBS, CREDIT_KW, MARKERS_SUBJ, MARKERS_OBJ, MARKERS_POSS,
-    QUESTION, DUE_WORDS, TODAY, WHO, TOP, TOTAL, UNDO, LAST, YES, NO, STOP, ITEM_HINTS))
+    QUESTION, DUE_WORDS, TODAY, WHO, TOP, TOTAL, UNDO, LAST, YES, NO, STOP, ITEM_HINTS,
+    FUTURE_VERBS, T_TOMORROW, T_AFTER, T_TODAY, U_DAY, U_WEEK, U_MONTH))
+_WILL = {norm("will"), norm("shall")}
+_WILL_VERBS = {norm(w) for w in ("bring", "give", "settle")}
+PROMISE_WORDS = FUTURE_VERBS | T_TOMORROW | T_AFTER | T_TODAY | U_DAY | U_WEEK | U_MONTH
 CURRENCY_STEMS = _N({"rupaian", "rupaia", "rupae"})
 
 
@@ -91,6 +107,7 @@ class Parsed:
     type: Optional[str] = None       # credit | payment
     type_defaulted: bool = False
     note: Optional[str] = None
+    promise_days: Optional[int] = None   # "kal dega" -> 1 (days from today); None = no promise
     confidence: float = 0.0
     transcript: str = ""
     source: str = "rules"
@@ -131,7 +148,12 @@ def _tokenise(text: str):
         if not clean:
             continue
         for part in _split_suffix(clean):
-            toks.append((part, norm(part)))
+            n = norm(part)
+            if n.endswith("ase") and n[:-3] in UNITS and re.search(r"[\u0900-\u097F]", part):
+                toks.append((part, n[:-3]))      # "तीनशे" -> three hundred
+                toks.append(("शे", "sau"))
+            else:
+                toks.append((part, n))
     if "?" in text and not any(n == "?" for _, n in toks):
         toks.append(("?", "?"))
     return toks
@@ -141,14 +163,53 @@ def _is_number_tok(n: str) -> bool:
     return bool(re.fullmatch(r"\d+(\.\d+)?", n)) or n in UNITS or n in MULT or n in FRACT_PREFIX
 
 
-def _parse_amount(toks):
+def _small_number(n):
+    if re.fullmatch(r"\d+", n):
+        return int(n)
+    v = UNITS.get(n)
+    return int(v) if v and float(v).is_integer() else None
+
+
+def _promise(toks):
+    """Find "will pay tomorrow"-style promises. Returns (days_from_today | None, token_indexes_used)."""
+    norms = [n for _, n in toks]
+    fut = {i for i, n in enumerate(norms) if n in FUTURE_VERBS or (len(n) >= 4 and n.endswith(FUTURE_SUFFIX))}
+    if not fut:
+        return None, set()
+    days, used = None, set()
+    for i, n in enumerate(norms):
+        if n in T_AFTER:
+            days, used = 2, {i}
+        elif n in T_TOMORROW:
+            days, used = 1, {i}
+        elif n in T_TODAY and days is None:
+            days, used = 0, {i}
+        elif n in U_DAY | U_WEEK | U_MONTH:
+            q = _small_number(norms[i - 1]) if i > 0 else None
+            if q is None and n in U_DAY:
+                continue                                  # a bare "din" is not a date
+            q = q or 1
+            days = q * (1 if n in U_DAY else 7 if n in U_WEEK else 30)
+            used = {i} | ({i - 1} if i > 0 and _small_number(norms[i - 1]) is not None else set())
+        if days is not None and n not in T_TODAY:
+            break
+    if days is None or days > 365:
+        return None, set()
+    used |= fut
+    for i in fut:                                         # "will pay" / "will return": swallow the verb too
+        if norms[i] in _WILL and i + 1 < len(norms) and norms[i + 1] in (PAYMENT_STRONG | GIVE_VERBS | _WILL_VERBS):
+            used.add(i + 1)
+    return days, used
+
+
+def _parse_amount(toks, skip=frozenset()):
     """Return (amount, set_of_token_indexes_used). Picks the number run that is
     most likely the rupee amount (next to a currency word, else the largest)."""
     runs, i = [], 0
     while i < len(toks):
-        if _is_number_tok(toks[i][1]):
+        if _is_number_tok(toks[i][1]) and i not in skip:
             j = i
-            while j < len(toks) and _is_number_tok(toks[j][1]):
+            while j < len(toks) and _is_number_tok(toks[j][1]) and j not in skip:
                 j += 1
             runs.append((i, j))
             i = j
@@ -173,10 +234,12 @@ def _parse_amount(toks):
                 else:
                     cur = (cur or 1) * m
         value = total + cur
-        if only_mult or value <= 0:
-            continue
         nxt = toks[b][1] if b < len(toks) else ""
         prv = toks[a - 1][1] if a > 0 else ""
+        if value <= 0:
+            continue
+        if only_mult and not (nxt in CURRENCY or prv in CURRENCY or nxt in MARKERS_POSS):
+            continue                              # a bare "sau" is only money when it sits by "rupaye"/"ka"
         score = value / 1e6
         if nxt in CURRENCY or prv in CURRENCY:
             score += 10
@@ -203,11 +266,12 @@ def _keyword_sets(norms):
 def _extract_name(toks, used):
     norms = [n for _, n in toks]
     skip = (STOP | CURRENCY | PAYMENT_STRONG | GIVE_VERBS | CREDIT_KW | QUESTION | DUE_WORDS
-            | TODAY | WHO | TOP | TOTAL | UNDO | LAST | ITEM_HINTS | MARKERS_SUBJ | MARKERS_OBJ | MARKERS_POSS)
+            | TODAY | WHO | TOP | TOTAL | UNDO | LAST | ITEM_HINTS | MARKERS_SUBJ | MARKERS_OBJ | MARKERS_POSS
+            | PROMISE_WORDS)
 
     def name_like(k):
         o, n = toks[k]
-        return (k not in used and n and n not in skip and not _is_number_tok(n)
+        return (k not in used and n and n not in skip and not (len(n) >= 4 and n.endswith(FUTURE_SUFFIX)) and not _is_number_tok(n)
                 and not re.fullmatch(r"\d.*", n) and n != "?")
 
     # 1) token(s) right before a case marker: "Ramesh ne", "Pappu ko", "Ramesh ka"
@@ -277,7 +341,9 @@ def parse(text: str, context: Optional[dict] = None) -> Parsed:
             p.intent, p.confidence = "yes", 0.9
             return p
 
-    amount, used = _parse_amount(toks)
+    promise_days, promise_idx = _promise(toks)
+    amount, used = _parse_amount(toks, skip=promise_idx)
+    used = used | promise_idx
     name, marker = _extract_name(toks, used)
     name = _clean_name(name)
 
@@ -302,7 +368,16 @@ def parse(text: str, context: Optional[dict] = None) -> Parsed:
         p.intent, p.confidence = "total", 0.6
         return p
 
-    # --- ledger entry
+    # "Ramesh kal dega" / "Ramesh will pay 500 tomorrow" (no new purchase): only the promise date changes
+    if promise_days is not None and name:
+        words = {n for k, n in enumerate(norms) if k not in promise_idx}
+        if not (words & (CREDIT_KW | PAYMENT_STRONG | GIVE_VERBS)):
+            p.intent, p.name, p.promise_days, p.confidence = "promise", name, promise_days, 0.8
+            return p
+
+    # --- ledger entry (promise words are not part of what was bought or paid)
+    s = {n for k, n in enumerate(norms) if k not in promise_idx}
+    joined = " ".join(n for k, n in enumerate(norms) if k not in promise_idx)
     credit_hits = s & CREDIT_KW or any(w in joined for w in ("lelia", "legaia", "lekegaia", "udhar"))
     pay_hits = s & PAYMENT_STRONG
     give_hits = s & GIVE_VERBS
@@ -330,6 +405,7 @@ def parse(text: str, context: Optional[dict] = None) -> Parsed:
             t, defaulted = context["type"], context.get("type_defaulted", False)
 
     p.name, p.amount, p.type, p.type_defaulted = name, amount, t, defaulted
+    p.promise_days = promise_days if t == "credit" else None
     p.note = _note(toks, used, name)
     if amount is not None or name:
         p.intent = "entry"
